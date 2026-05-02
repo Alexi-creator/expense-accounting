@@ -38,7 +38,7 @@ export class ExpenseHandler {
 
   async handleAmountInput(ctx: Context, userId: string, text: string) {
     const amount = parseFloat(text.replace(',', '.'));
-    if (isNaN(amount) || amount <= 0) {
+    if (Number.isNaN(amount) || amount <= 0) {
       await ctx.reply('Введите корректную сумму (например: 500 или 1500.50):');
       return;
     }
@@ -46,7 +46,7 @@ export class ExpenseHandler {
       step: 'addexpense:waiting_description',
       amount,
     });
-    await ctx.reply('Введите описание или отправьте /skip чтобы пропустить:');
+    await ctx.reply('Введите описание:');
   }
 
   async handleDescriptionInput(ctx: Context, userId: string, text: string) {
@@ -57,17 +57,16 @@ export class ExpenseHandler {
       return;
     }
 
-    const description = text === '/skip' ? undefined : text;
     await this.expensesService.create({
       userId,
       categoryId: state.categoryId,
       amount: Number(state.amount),
-      description,
+      description: text,
     });
 
     await this.stateService.reset(userId);
     await ctx.reply(
-      `✅ Трата добавлена!\n\nКатегория: ${state.categoryName}\nСумма: ${Number(state.amount)} ₽${description ? `\nОписание: ${description}` : ''}`,
+      `✅ Трата добавлена!\n\nКатегория: ${state.categoryName}\nСумма: ${Number(state.amount)} \nОписание: ${text}`,
       { reply_markup: MAIN_MENU },
     );
   }

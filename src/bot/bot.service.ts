@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Bot } from 'grammy';
 import { UsersService } from '../modules/users/users.service';
@@ -9,8 +9,7 @@ import { StateService } from './state.service';
 
 @Injectable()
 export class BotService implements OnModuleInit {
-  private readonly logger = new Logger(BotService.name);
-  readonly bot: Bot;
+readonly bot: Bot;
 
   constructor(
     private readonly config: ConfigService,
@@ -28,16 +27,6 @@ export class BotService implements OnModuleInit {
   async onModuleInit() {
     await this.bot.init();
     this.registerHandlers();
-
-    const webhookUrl = this.config.get<string>('WEBHOOK_URL');
-    if (webhookUrl) {
-      try {
-        await this.bot.api.setWebhook(`${webhookUrl}/bot/webhook`);
-        this.logger.log(`Webhook set: ${webhookUrl}/bot/webhook`);
-      } catch {
-        this.logger.warn('Failed to set webhook — is ngrok running? Run: make ngrok');
-      }
-    }
   }
 
   handleUpdate(update: object) {
@@ -79,7 +68,8 @@ export class BotService implements OnModuleInit {
 
       // роутинг по тексту кнопок меню
       if (text === 'Добавить категорию') return this.categoryHandler.handleAdd(ctx, userId);
-      if (text === 'Посмотреть все категории') return this.categoryHandler.handleViewAll(ctx, userId);
+      if (text === 'Посмотреть все категории')
+        return this.categoryHandler.handleViewAll(ctx, userId);
       if (text === 'Удалить категорию') return this.categoryHandler.handleDeleteMenu(ctx, userId);
       if (text === 'Добавить трату') return this.expenseHandler.handleAdd(ctx, userId);
 

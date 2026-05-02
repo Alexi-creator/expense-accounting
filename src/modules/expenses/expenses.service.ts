@@ -15,9 +15,7 @@ export class ExpensesService {
     return this.prisma.expense.findMany({
       where: {
         userId,
-        ...(from || to
-          ? { createdAt: { gte: from, lte: to } }
-          : {}),
+        ...(from || to ? { createdAt: { gte: from, lte: to } } : {}),
       },
       include: { category: true },
       orderBy: { createdAt: 'desc' },

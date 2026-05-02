@@ -13,11 +13,7 @@ export class ExpensesController {
   }
 
   @Get()
-  findAll(
-    @Query('userId') userId: string,
-    @Query('from') from?: string,
-    @Query('to') to?: string,
-  ) {
+  findAll(@Query('userId') userId: string, @Query('from') from?: string, @Query('to') to?: string) {
     return this.expensesService.findAllByUser(
       userId,
       from ? new Date(from) : undefined,
