@@ -24,6 +24,9 @@
     "@nestjs/common": "^11.0.1",
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",
+    "@prisma/client": "^7.8.0",
+    "dotenv": "^17.4.2",
+    "prisma": "^7.8.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
   },
@@ -54,7 +57,12 @@
     "rootDir": "src",
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
-      "^.+\\.(t|j)s$": ["ts-jest", { "tsconfig": "tsconfig.spec.json" }]
+      "^.+\\.(t|j)s$": [
+        "ts-jest",
+        {
+          "tsconfig": "tsconfig.spec.json"
+        }
+      ]
     },
     "collectCoverageFrom": [
       "**/*.(t|j)s"
