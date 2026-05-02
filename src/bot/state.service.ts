@@ -5,7 +5,9 @@ export type Step =
   | 'idle'
   | 'addcategory:waiting_name'
   | 'addexpense:waiting_amount'
-  | 'addexpense:waiting_description';
+  | 'addexpense:waiting_description'
+  | 'stat:waiting_for_period'
+  | 'stat:waiting_for_details';
 
 @Injectable()
 export class StateService {
@@ -28,6 +30,8 @@ export class StateService {
       categoryName?: string;
       amount?: number;
       description?: string;
+      period?: string;
+      isDetails?: boolean;
     },
   ) {
     await this.prisma.userState.upsert({

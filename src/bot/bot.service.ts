@@ -5,6 +5,7 @@ import { UsersService } from '../modules/users/users.service';
 import { CategoryHandler } from './handlers/category.handler';
 import { ExpenseHandler } from './handlers/expense.handler';
 import { StartHandler } from './handlers/start.handler';
+import { StatHandler } from './handlers/stat.handler';
 import { StateService } from './state.service';
 
 @Injectable()
@@ -18,6 +19,7 @@ readonly bot: Bot;
     private readonly startHandler: StartHandler,
     private readonly categoryHandler: CategoryHandler,
     private readonly expenseHandler: ExpenseHandler,
+    private readonly statHandler: StatHandler,
   ) {
     const token = this.config.get<string>('BOT_TOKEN');
     if (!token) throw new Error('BOT_TOKEN is not defined');
@@ -42,11 +44,15 @@ readonly bot: Bot;
       const { user } = await this.usersService.findOrCreateByTelegramId(telegramId);
 
       if (data.startsWith('/addexpense:')) {
-        const categoryId = data.replace('/addexpense:', '');
-        await this.expenseHandler.handleCategorySelected(ctx, user.id, categoryId);
+        await this.expenseHandler.handleCategorySelected(ctx, user.id, data.slice('/addexpense:'.length));
       } else if (data.startsWith('/deletecategory:')) {
-        const categoryId = data.replace('/deletecategory:', '');
-        await this.categoryHandler.handleDelete(ctx, categoryId);
+        await this.categoryHandler.handleDelete(ctx, data.slice('/deletecategory:'.length));
+      } else if (data.startsWith('/stat:')) {
+        await this.statHandler.handleCategorySelected(ctx, user.id, data.slice('/stat:'.length));
+      } else if (data.startsWith('/period:')) {
+        await this.statHandler.handlePeriodSelected(ctx, user.id, data.slice('/period:'.length));
+      } else if (data.startsWith('/details:')) {
+        await this.statHandler.handleDetailsSelected(ctx, user.id, data.slice('/details:'.length) === 'yes');
       }
 
       await ctx.answerCallbackQuery();
@@ -72,6 +78,7 @@ readonly bot: Bot;
         return this.categoryHandler.handleViewAll(ctx, userId);
       if (text === 'Удалить категорию') return this.categoryHandler.handleDeleteMenu(ctx, userId);
       if (text === 'Добавить трату') return this.expenseHandler.handleAdd(ctx, userId);
+      if (text === 'Статистика') return this.statHandler.handleStat(ctx, userId);
 
       // роутинг по текущему шагу FSM
       if (step === 'addcategory:waiting_name') {
