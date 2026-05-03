@@ -34,13 +34,13 @@ model Category {
 model Expense {
   id          String   @id @default(uuid())
   userId      String   @map("user_id")
-  categoryId  String?  @map("category_id")
+  categoryId  String   @map("category_id")
   amount      Decimal  @db.Decimal(12, 2)
-  description String?
+  description String
   createdAt   DateTime @default(now()) @map("created_at")
 
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  category Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
 
   @@map("expenses")
 }

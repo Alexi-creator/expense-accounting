@@ -46,7 +46,11 @@ readonly bot: Bot;
       if (data.startsWith('/addexpense:')) {
         await this.expenseHandler.handleCategorySelected(ctx, user.id, data.slice('/addexpense:'.length));
       } else if (data.startsWith('/deletecategory:')) {
-        await this.categoryHandler.handleDelete(ctx, data.slice('/deletecategory:'.length));
+        await this.categoryHandler.handleDeleteConfirm(ctx, data.slice('/deletecategory:'.length));
+      } else if (data.startsWith('/confirmdelete:')) {
+        await this.categoryHandler.handleDelete(ctx, data.slice('/confirmdelete:'.length));
+      } else if (data === '/canceldelete') {
+        await this.categoryHandler.handleDeleteCancel(ctx);
       } else if (data.startsWith('/stat:')) {
         await this.statHandler.handleCategorySelected(ctx, user.id, data.slice('/stat:'.length));
       } else if (data.startsWith('/period:')) {

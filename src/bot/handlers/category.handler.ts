@@ -45,8 +45,23 @@ export class CategoryHandler {
     await ctx.reply('Выберите категорию для удаления:', { reply_markup: keyboard });
   }
 
+  async handleDeleteConfirm(ctx: Context, categoryId: string) {
+    const category = await this.categoriesService.findOne(categoryId);
+    const keyboard = new InlineKeyboard()
+      .text('✅ Да, удалить', `/confirmdelete:${categoryId}`)
+      .text('❌ Отмена', '/canceldelete');
+    await ctx.reply(
+      `Удалить категорию «${category.name}»?\n\nВсе траты по ней тоже удалятся.`,
+      { reply_markup: keyboard },
+    );
+  }
+
   async handleDelete(ctx: Context, categoryId: string) {
     await this.categoriesService.remove(categoryId);
-    await ctx.reply('✅ Категория удалена.', { reply_markup: MAIN_MENU });
+    await ctx.reply('✅ Категория и все её траты удалены.', { reply_markup: MAIN_MENU });
+  }
+
+  async handleDeleteCancel(ctx: Context) {
+    await ctx.reply('Отменено.', { reply_markup: MAIN_MENU });
   }
 }

@@ -1,4 +1,4 @@
-import { IsNumber, IsOptional, IsPositive, IsString, IsUUID } from 'class-validator';
+import { IsNumber, IsPositive, IsString, IsUUID } from 'class-validator';
 
 export class CreateExpenseDto {
   @IsUUID()
@@ -9,10 +9,8 @@ export class CreateExpenseDto {
   amount: number;
 
   @IsUUID()
-  @IsOptional()
-  categoryId?: string;
+  categoryId: string;
 
   @IsString()
-  @IsOptional()
-  description?: string;
+  description: string;
 }
