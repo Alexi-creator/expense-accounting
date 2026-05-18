@@ -41,17 +41,13 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Check VPS configured
-        id: vps
         run: |
-          if [ -n "${{ secrets.SSH_HOST }}" ]; then
-            echo "ready=true" >> $GITHUB_OUTPUT
-          else
-            echo "ready=false" >> $GITHUB_OUTPUT
-            echo "SSH_HOST secret not set, skipping deploy"
+          if [ -z "${{ secrets.SSH_HOST }}" ]; then
+            echo "::error::SSH_HOST secret is not set. Add VPS secrets to enable deployment."
+            exit 1
           fi
 
       - name: Deploy to VPS
-        if: steps.vps.outputs.ready == 'true'
         uses: appleboy/ssh-action@v1
         env:
           GHCR_IMAGE: ${{ env.IMAGE_NAME }}:latest
