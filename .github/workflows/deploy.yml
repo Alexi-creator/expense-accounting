@@ -70,7 +70,7 @@ jobs:
             echo "::endgroup::"
 
             echo "::group::Run migrations"
-            docker run --rm --env-file .env --network host "$GHCR_IMAGE" npm run migration:run
+            docker run --rm --env-file /opt/expense-accounting/.env --network host "$GHCR_IMAGE" npm run migration:run
             echo "::endgroup::"
 
             echo "::group::Restart app"
@@ -78,7 +78,7 @@ jobs:
             docker rm expense-accounting 2>/dev/null || true
             docker run -d \
               --name expense-accounting \
-              --env-file .env \
+              --env-file /opt/expense-accounting/.env \
               --restart unless-stopped \
               --network host \
               "$GHCR_IMAGE"
