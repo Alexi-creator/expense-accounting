@@ -26,7 +26,7 @@ db-studio:
 	docker compose run --rm -p 5555:5555 app npx prisma studio
 
 set-webhook:
-	curl -F "url=$(WEBHOOK_URL)/webhook" \
+	curl -F "url=$(WEBHOOK_URL)/bot/webhook" \
 		https://api.telegram.org/bot$(BOT_TOKEN)/setWebhook
 
 build:
