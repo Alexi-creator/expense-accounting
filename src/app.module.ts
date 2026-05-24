@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { BotModule } from './bot/bot.module';
 import { envSchema } from './config/env.schema';
 import { AuthModule } from './modules/auth/auth.module';
@@ -16,6 +17,7 @@ import { PrismaModule } from './prisma/prisma.module';
       isGlobal: true,
       validate: (config) => envSchema.parse(config),
     }),
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
     PrismaModule,
     UsersModule,
     CategoriesModule,
@@ -24,10 +26,8 @@ import { PrismaModule } from './prisma/prisma.module';
     BotModule,
   ],
   providers: [
-    {
-      provide: APP_GUARD,
-      useClass: JwtAuthGuard,
-    },
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
   ],
 })
 export class AppModule {}

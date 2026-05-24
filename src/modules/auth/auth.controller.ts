@@ -11,8 +11,10 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import '@fastify/cookie';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { ACCESS_TOKEN_TTL_SECONDS, REFRESH_TOKEN_TTL_SECONDS } from './auth.constants';
 import { AuthService } from './auth.service';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { Public } from './decorators/public.decorator';
@@ -24,9 +26,8 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
 const ACCESS_COOKIE = 'access_token';
 const REFRESH_COOKIE = 'refresh_token';
-const ACCESS_TTL_SECONDS = 15 * 60;
-const REFRESH_TTL_SECONDS = 7 * 24 * 60 * 60;
 
+@Throttle({ default: { ttl: 60_000, limit: 10 } })
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
@@ -125,14 +126,14 @@ export class AuthController {
       secure,
       sameSite: 'lax',
       path: '/',
-      maxAge: ACCESS_TTL_SECONDS,
+      maxAge: ACCESS_TOKEN_TTL_SECONDS,
     });
     res.setCookie(REFRESH_COOKIE, refreshToken, {
       httpOnly: true,
       secure,
       sameSite: 'lax',
       path: '/api/auth',
-      maxAge: REFRESH_TTL_SECONDS,
+      maxAge: REFRESH_TOKEN_TTL_SECONDS,
     });
   }
 }
