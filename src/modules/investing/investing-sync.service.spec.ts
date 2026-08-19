@@ -76,10 +76,14 @@ describe('InvestingSyncService', () => {
       upsert: jest.Mock;
       findMany: jest.Mock;
       findFirst: jest.Mock;
+      findUnique: jest.Mock;
       update: jest.Mock;
       create: jest.Mock;
+      delete: jest.Mock;
     };
+    positionNote: { updateMany: jest.Mock };
     tradeExecution: { upsert: jest.Mock; findMany: jest.Mock };
+    $transaction: jest.Mock;
   };
   let bybit: { getClosedPnl: jest.Mock; getExecutions: jest.Mock; getOpenPositions: jest.Mock };
 
@@ -90,10 +94,14 @@ describe('InvestingSyncService', () => {
         upsert: jest.fn(),
         findMany: jest.fn().mockResolvedValue([]),
         findFirst: jest.fn().mockResolvedValue(null),
+        findUnique: jest.fn().mockResolvedValue(null),
         update: jest.fn(),
         create: jest.fn(),
+        delete: jest.fn(),
       },
+      positionNote: { updateMany: jest.fn() },
       tradeExecution: { upsert: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+      $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
     };
     bybit = {
       getClosedPnl: jest.fn().mockResolvedValue({ list: [], nextPageCursor: '' }),
@@ -186,6 +194,42 @@ describe('InvestingSyncService', () => {
       data: expect.objectContaining({ status: 'CLOSED', orderId: 'o1', closedPnl: '500' }),
     });
     expect(prisma.position.upsert).not.toHaveBeenCalled();
+  });
+
+  it('merges into the OPEN row instead of violating the (account_id, order_id) unique constraint when another row already owns that orderId', async () => {
+    prisma.position.findFirst.mockResolvedValue({ id: 'open-row-1' });
+    prisma.position.findUnique.mockResolvedValue({ id: 'stale-row-1' });
+    bybit.getClosedPnl
+      .mockResolvedValueOnce({ list: [pnlRecord()], nextPageCursor: '' })
+      .mockResolvedValue({ list: [], nextPageCursor: '' });
+
+    await service.syncAccount(makeAccount());
+
+    expect(prisma.positionNote.updateMany).toHaveBeenCalledWith({
+      where: { positionId: 'stale-row-1' },
+      data: { positionId: 'open-row-1' },
+    });
+    expect(prisma.position.delete).toHaveBeenCalledWith({ where: { id: 'stale-row-1' } });
+    expect(prisma.position.update).toHaveBeenCalledWith({
+      where: { id: 'open-row-1' },
+      data: expect.objectContaining({ status: 'CLOSED', orderId: 'o1', closedPnl: '500' }),
+    });
+  });
+
+  it('updates the OPEN row directly when it already owns the orderId (no self-conflict)', async () => {
+    prisma.position.findFirst.mockResolvedValue({ id: 'open-row-1' });
+    prisma.position.findUnique.mockResolvedValue({ id: 'open-row-1' });
+    bybit.getClosedPnl
+      .mockResolvedValueOnce({ list: [pnlRecord()], nextPageCursor: '' })
+      .mockResolvedValue({ list: [], nextPageCursor: '' });
+
+    await service.syncAccount(makeAccount());
+
+    expect(prisma.position.delete).not.toHaveBeenCalled();
+    expect(prisma.position.update).toHaveBeenCalledWith({
+      where: { id: 'open-row-1' },
+      data: expect.objectContaining({ status: 'CLOSED', orderId: 'o1', closedPnl: '500' }),
+    });
   });
 
   it("creates an OPEN position from Bybit's live position list", async () => {

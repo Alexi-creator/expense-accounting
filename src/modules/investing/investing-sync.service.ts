@@ -139,7 +139,25 @@ export class InvestingSyncService {
             },
           });
           if (openRow) {
-            await this.prisma.position.update({ where: { id: openRow.id }, data });
+            // Another row may already own this orderId — e.g. created by the upsert
+            // fallback below during a prior/overlapping sync window. A plain update
+            // here would otherwise violate the (account_id, order_id) unique
+            // constraint, so merge into openRow instead of updating blindly.
+            const conflicting = await this.prisma.position.findUnique({
+              where: { accountId_orderId: { accountId: account.id, orderId: rec.orderId } },
+            });
+            if (conflicting && conflicting.id !== openRow.id) {
+              await this.prisma.$transaction([
+                this.prisma.positionNote.updateMany({
+                  where: { positionId: conflicting.id },
+                  data: { positionId: openRow.id },
+                }),
+                this.prisma.position.delete({ where: { id: conflicting.id } }),
+                this.prisma.position.update({ where: { id: openRow.id }, data }),
+              ]);
+            } else {
+              await this.prisma.position.update({ where: { id: openRow.id }, data });
+            }
             continue;
           }
 
