@@ -281,7 +281,15 @@ export class InvestingService {
       .map((p) => p.id);
   }
 
-  private buildPositionsWhere(userId: string, query: ListQuery) {
+  // dateField defaults to openedAt so the from/to range picks trades by when they were entered —
+  // open/closed is a separate concern, surfaced via `status` (filter or badge in the UI), not by
+  // the date range hiding still-open trades outside it. getEquityCurve overrides this to closedAt
+  // since that chart plots realized PnL over the date it actually landed, not when the trade began.
+  private buildPositionsWhere(
+    userId: string,
+    query: ListQuery,
+    dateField: 'openedAt' | 'closedAt' = 'openedAt',
+  ) {
     return {
       userId,
       ...(query.accountId ? { accountId: query.accountId } : {}),
@@ -290,16 +298,7 @@ export class InvestingService {
       ...(query.symbol ? { symbol: { contains: query.symbol.toUpperCase() } } : {}),
       ...(query.status ? { status: query.status } : {}),
       ...(query.category ? { category: query.category } : {}),
-      // A closing-date filter is meaningless for an OPEN position (closedAt is null) — rather
-      // than silently hiding whatever's still open, it stays visible regardless of the range;
-      // only CLOSED rows are actually filtered by it. (When status is filtered explicitly above,
-      // this OR is either redundant with it — CLOSED — or trivially satisfied by it — OPEN —
-      // so it never changes the outcome; no special-casing needed.)
-      ...(query.from || query.to
-        ? {
-            OR: [{ status: 'OPEN' as const }, { closedAt: { gte: query.from, lte: query.to } }],
-          }
-        : {}),
+      ...(query.from || query.to ? { [dateField]: { gte: query.from, lte: query.to } } : {}),
     };
   }
 
@@ -333,7 +332,7 @@ export class InvestingService {
   // no MAX_PAGE cap. Deliberately narrow (two fields only): getPositions' `items` is paginated
   // for the diary table and must never be the source for a chart spanning the whole history.
   async getEquityCurve(userId: string, query: Omit<ListQuery, 'status' | 'limit' | 'offset'>) {
-    const where = this.buildPositionsWhere(userId, { ...query, status: 'CLOSED' });
+    const where = this.buildPositionsWhere(userId, { ...query, status: 'CLOSED' }, 'closedAt');
     const rows = await this.prisma.position.findMany({
       where,
       select: { closedAt: true, closedPnl: true },

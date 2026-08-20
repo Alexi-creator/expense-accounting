@@ -265,7 +265,7 @@ describe('InvestingService', () => {
         where: {
           userId: 'u1',
           symbol: { contains: 'BTCUSDT' },
-          OR: [{ status: 'OPEN' }, { closedAt: { gte: from, lte: undefined } }],
+          openedAt: { gte: from, lte: undefined },
         },
         orderBy: [{ openedAt: 'desc' }, { closedAt: 'desc' }],
         include: { notes: { orderBy: { createdAt: 'asc' } } },
@@ -277,7 +277,7 @@ describe('InvestingService', () => {
       expect(result.items[0]).toMatchObject({ id: 'p1', entryVolumeUsd: 65000, totalFeeUsd: null });
     });
 
-    it('keeps a date filter from hiding OPEN positions, which have no closedAt', async () => {
+    it('filters by openedAt range so still-open trades outside it stay hidden, unlike closedAt', async () => {
       prisma.position.findMany.mockResolvedValue([]);
       prisma.position.count.mockResolvedValue(0);
       const from = new Date('2026-07-20');
@@ -287,11 +287,11 @@ describe('InvestingService', () => {
 
       expect(prisma.position.findMany.mock.calls[0][0].where).toEqual({
         userId: 'u1',
-        OR: [{ status: 'OPEN' }, { closedAt: { gte: from, lte: to } }],
+        openedAt: { gte: from, lte: to },
       });
     });
 
-    it('omits the OR entirely with no date filter (no accidental status restriction)', async () => {
+    it('applies no date filter when from/to are omitted', async () => {
       prisma.position.findMany.mockResolvedValue([]);
       prisma.position.count.mockResolvedValue(0);
 
@@ -324,7 +324,7 @@ describe('InvestingService', () => {
       });
     });
 
-    it('combines status=CLOSED with a date range (the OR collapses to just the range)', async () => {
+    it('combines status=CLOSED with an openedAt date range', async () => {
       prisma.position.findMany.mockResolvedValue([]);
       prisma.position.count.mockResolvedValue(0);
       const from = new Date('2026-07-01');
@@ -334,7 +334,7 @@ describe('InvestingService', () => {
       expect(prisma.position.findMany.mock.calls[0][0].where).toEqual({
         userId: 'u1',
         status: 'CLOSED',
-        OR: [{ status: 'OPEN' }, { closedAt: { gte: from, lte: undefined } }],
+        openedAt: { gte: from, lte: undefined },
       });
     });
 
@@ -720,7 +720,7 @@ describe('InvestingService', () => {
         symbol: { contains: 'BTCUSDT' },
         status: 'CLOSED',
         category: 'linear',
-        OR: [{ status: 'OPEN' }, { closedAt: { gte: from, lte: undefined } }],
+        openedAt: { gte: from, lte: undefined },
       };
       expect(prisma.position.aggregate).toHaveBeenCalledWith({
         where: expectedWhere,
@@ -810,7 +810,7 @@ describe('InvestingService', () => {
         symbol: { contains: 'BTCUSDT' },
         category: 'linear',
         status: 'CLOSED',
-        OR: [{ status: 'OPEN' }, { closedAt: { gte: from, lte: undefined } }],
+        closedAt: { gte: from, lte: undefined },
       });
     });
 
