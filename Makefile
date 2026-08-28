@@ -32,3 +32,9 @@ set-webhook:
 
 build:
 	npm run build
+
+# Recreate the node_modules volume after package.json changes
+refresh-deps:
+	docker compose down
+	docker volume rm -f limebalance_node_modules
+	docker compose build app
