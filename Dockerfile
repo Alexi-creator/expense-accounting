@@ -12,6 +12,9 @@ RUN npm ci
 COPY . .
 
 RUN npx prisma generate && npm run build
+# The production stage starts `node dist/main.js`, so a build that puts the entrypoint anywhere
+# else must fail here rather than produce an image that crash-loops on the server.
+RUN test -f dist/main.js
 
 # ============================================
 # Stage 2: Development

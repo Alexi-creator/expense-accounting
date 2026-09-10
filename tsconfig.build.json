@@ -1,4 +1,17 @@
 {
   "extends": "./tsconfig.json",
-  "exclude": ["node_modules", "test", "dist", "**/*spec.ts", "prisma.config.ts", "prisma"]
+  // `scripts` matters as much as the rest here: tsconfig.json has no `include`, so TypeScript
+  // compiles every .ts under the project root and infers rootDir from their common ancestor.
+  // One .ts file outside src/ moves that ancestor up and shifts the whole output into dist/src/,
+  // leaving the image without the dist/main.js it starts from. Standalone scripts are run with
+  // ts-node against tsconfig.json and never need building.
+  "exclude": [
+    "node_modules",
+    "test",
+    "dist",
+    "scripts",
+    "**/*spec.ts",
+    "prisma.config.ts",
+    "prisma"
+  ]
 }
