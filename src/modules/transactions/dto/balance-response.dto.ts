@@ -1,25 +1,53 @@
 import { ApiProperty } from '@nestjs/swagger';
 
+export class CurrencyBalanceDto {
+  @ApiProperty({ example: 'THB' })
+  currency: string;
+
+  @ApiProperty({
+    example: 48320.5,
+    description: 'Exact free balance in this currency — a plain sum, never converted.',
+  })
+  amount: number;
+}
+
 export class BalanceResponseDto {
   @ApiProperty({ example: 'THB', description: "User's base currency for the balance field" })
   baseCurrency: string;
 
   @ApiProperty({
-    example: 1234.56,
+    type: [CurrencyBalanceDto],
+    description:
+      'The balance itself: one exact figure per currency held (income − expenses − active goal ' +
+      'reserves), with no conversion involved. The base currency is always listed, even at zero. ' +
+      'This is the source of truth — `balance` below is a convenience roll-up.',
+  })
+  byCurrency: CurrencyBalanceDto[];
+
+  @ApiProperty({
+    example: 66000,
     nullable: true,
     description:
-      'Free balance (income − expenses − money reserved in active goals) in USD. ' +
-      'null if rates are unavailable.',
+      'Everything rolled into the base currency: base-currency money exactly as it is, other ' +
+      "currencies at today's mid-market rate. null if a conversion was needed and rates were " +
+      'unavailable.',
+  })
+  balance: number | null;
+
+  @ApiProperty({
+    example: 2062.5,
+    nullable: true,
+    description: 'The same roll-up in USD. null if rates are unavailable.',
   })
   balanceUsd: number | null;
 
   @ApiProperty({
-    example: 44000,
-    nullable: true,
+    example: false,
     description:
-      'The same free balance in the base currency at the current rate. null if rates are unavailable.',
+      '`balance` involved converting a foreign holding, so it is an estimate — show it with a ' +
+      '"≈". False means every figure is exact.',
   })
-  balance: number | null;
+  isApproximate: boolean;
 
   @ApiProperty({
     example: 913200,

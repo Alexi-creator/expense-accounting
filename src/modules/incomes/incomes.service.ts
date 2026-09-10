@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { localWallClockNow } from '../../common/timezone.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CurrencyService } from '../currency/currency.service';
+import { FxRatesService } from '../currency/fx-rates.service';
 import { aggregateSummary, buildBuckets, type Granularity } from '../currency/summary.util';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CreateIncomeDto } from './dto/create-income.dto';
@@ -12,14 +13,16 @@ export class IncomesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly currency: CurrencyService,
+    private readonly fx: FxRatesService,
     private readonly subscriptions: SubscriptionsService,
   ) {}
 
   async create(userId: string, dto: CreateIncomeDto) {
     await this.subscriptions.assertCanAddTransaction(userId);
     const currency = dto.currency ?? (await this.resolveUserCurrency(userId));
-    // USD value snapshot at the current rate (fixed at creation time).
-    const amountUsd = await this.currency.convert(dto.amount, currency, 'USD');
+    // USD value snapshot at the rate of the operation's own date, not of the day it was entered:
+    // a backdated row must be worth what it was worth then, and re-entering it must not move it.
+    const amountUsd = await this.fx.convertOn(dto.amount, currency, 'USD', dto.date);
     return this.prisma.income.create({ data: { ...dto, userId, currency, amountUsd } });
   }
 
@@ -56,15 +59,7 @@ export class IncomesService {
 
     const baseCurrency = user?.currency ?? 'USD';
     const bucketKeys = buildBuckets(from, to, granularity);
-    return aggregateSummary(
-      rows,
-      bucketKeys,
-      granularity,
-      baseCurrency,
-      rates,
-      this.currency,
-      'income',
-    );
+    return aggregateSummary(rows, bucketKeys, granularity, baseCurrency, rates, this.currency);
   }
 
   async findOne(id: string, userId: string) {
@@ -84,11 +79,16 @@ export class IncomesService {
     // silently re-snapshot at today's rate).
     const amountChanged = dto.amount !== undefined && dto.amount !== Number(existing.amount);
     const currencyChanged = dto.currency !== undefined && dto.currency !== existing.currency;
+    // The date is part of the snapshot too — moving a row to another date changes the rate it is
+    // valued at.
+    const dateChanged =
+      dto.date !== undefined && dto.date.getTime() !== new Date(existing.date).getTime();
     let amountUsd: number | null | undefined;
-    if (amountChanged || currencyChanged) {
+    if (amountChanged || currencyChanged || dateChanged) {
       const amount = dto.amount ?? Number(existing.amount);
       const currency = dto.currency ?? existing.currency;
-      amountUsd = await this.currency.convert(amount, currency, 'USD');
+      const date = dto.date ?? existing.date;
+      amountUsd = await this.fx.convertOn(amount, currency, 'USD', date);
     }
 
     return this.prisma.income.update({
@@ -166,13 +166,13 @@ export class IncomesService {
       category: catMap.get(catId)?.name ?? '—',
       emoji: catMap.get(catId)?.emoji ?? null,
       // Category total in the base currency (approx. by rate). null if rates are unavailable.
-      total: this.currency.approxTotalInBase(groups, baseCurrency, rates, 'income'),
+      total: this.currency.approxTotalInBase(groups, baseCurrency, rates),
     }));
 
     return {
       baseCurrency,
       // Overall total — a single conversion across all rows (matches the web dashboard).
-      total: this.currency.approxTotalInBase(allGroups, baseCurrency, rates, 'income'),
+      total: this.currency.approxTotalInBase(allGroups, baseCurrency, rates),
       items,
     };
   }
@@ -244,13 +244,13 @@ export class IncomesService {
       category,
       emoji: group.emoji,
       // Category total — converted to the base currency in a single pass (as in the web dashboard).
-      total: this.currency.approxTotalInBase(group.rows, baseCurrency, rates, 'income'),
+      total: this.currency.approxTotalInBase(group.rows, baseCurrency, rates),
       items: group.items,
     }));
 
     return {
       baseCurrency,
-      total: this.currency.approxTotalInBase(allRows, baseCurrency, rates, 'income'),
+      total: this.currency.approxTotalInBase(allRows, baseCurrency, rates),
       categories,
     };
   }

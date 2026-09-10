@@ -1,10 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 
 // Rates relative to USD: rates[X] = how many units of X per 1 USD.
-type Rates = Record<string, number>;
-
-// Flow direction for the real-conversion adjustment (see approxTotalInBase).
-export type FlowKind = 'expense' | 'income' | 'none';
+export type Rates = Record<string, number>;
 
 const BASE = 'USD';
 const TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
@@ -15,15 +12,6 @@ export class CurrencyService {
   private readonly logger = new Logger(CurrencyService.name);
   private cache: { rates: Rates; fetchedAt: number } | null = null;
   private inflight: Promise<Rates | null> | null = null;
-
-  // Adjustment for the real cost of converting currencies (exchange spread + fees): the
-  // mid-market rate is unreachable in practice. A fraction, configurable via env FX_SPREAD; defaults to 2%.
-  private readonly fxSpread = CurrencyService.parseSpread(process.env.FX_SPREAD);
-
-  private static parseSpread(raw: string | undefined): number {
-    const v = Number(raw);
-    return Number.isFinite(v) && v >= 0 && v < 1 ? v : 0.02;
-  }
 
   // Current rates with an in-memory cache. null if the fetch failed and there is no cache.
   async getRates(): Promise<Rates | null> {
@@ -101,35 +89,30 @@ export class CurrencyService {
 
   // Aggregates a set of amounts into the base currency, converting EACH row individually.
   // Rows already in the base currency are taken directly (no conversion): otherwise the round-trip
-  // base → USD (snapshot) → base (current rate) at different rates diverges from the sum of the
+  // base -> USD (snapshot) -> base (current rate) at different rates diverges from the sum of the
   // items themselves. Other currencies are converted via USD (amountUsd snapshot, otherwise the
-  // current rate), then USD → base at the current rate.
+  // current rate), then USD -> base at the current rate.
+  // The result is a mid-market estimate: the cost of actually converting is not guessed at here
+  // (it belongs to a real exchange the user records), so amounts never silently shrink or grow.
   // Returns null if conversion needs rates and they are unavailable / the currency is unknown.
   approxTotalInBase(
     rows: { amount: number; currency: string; amountUsd: number | null }[],
     baseCurrency: string,
     rates: Rates | null,
-    direction: FlowKind = 'none',
   ): number | null {
-    // The real-conversion adjustment is applied ONLY to cross-currency rows and
-    // directionally: an expense really cost more (×1+spread), income was really received less
-    // (×1−spread). Rows in the base currency are taken as-is.
-    const factor =
-      direction === 'expense' ? 1 + this.fxSpread : direction === 'income' ? 1 - this.fxSpread : 1;
     let sum = 0;
     for (const r of rows) {
       if (r.currency === baseCurrency) {
         sum += r.amount;
         continue;
       }
-      // Row value in USD: the snapshot at creation time, otherwise recomputed at the current rate.
+      // Row value in USD: the snapshot taken at its operation date, otherwise the current rate.
       const usd =
         r.amountUsd != null ? r.amountUsd : this.convert_(rates, r.amount, r.currency, BASE);
       if (usd === null) return null;
-      // USD → base currency at the current rate, with the spread adjustment.
       const inBase = baseCurrency === BASE ? usd : this.convert_(rates, usd, BASE, baseCurrency);
       if (inBase === null) return null;
-      sum += inBase * factor;
+      sum += inBase;
     }
     return Math.round(sum * 100) / 100;
   }

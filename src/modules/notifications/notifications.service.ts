@@ -150,18 +150,8 @@ export class NotificationsService {
       }));
 
     const baseCurrency = user?.currency ?? 'USD';
-    const income = this.currency.approxTotalInBase(
-      toRows(incomeGroups),
-      baseCurrency,
-      rates,
-      'income',
-    );
-    const expense = this.currency.approxTotalInBase(
-      toRows(expenseGroups),
-      baseCurrency,
-      rates,
-      'expense',
-    );
+    const income = this.currency.approxTotalInBase(toRows(incomeGroups), baseCurrency, rates);
+    const expense = this.currency.approxTotalInBase(toRows(expenseGroups), baseCurrency, rates);
     const net =
       income !== null && expense !== null ? Math.round((income - expense) * 100) / 100 : null;
 

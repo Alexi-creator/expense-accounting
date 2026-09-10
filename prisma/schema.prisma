@@ -88,6 +88,7 @@ model User {
   positionNotes              PositionNote[]
   holdings                   Holding[]
   botNotificationPreferences BotNotificationPreference[]
+  currencyExchanges          CurrencyExchange[]
 
   @@map("users")
 }
@@ -473,4 +474,42 @@ model UserState {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("user_states")
+}
+
+// Daily USD exchange-rate history. One row per (date, currency): how many units of `currency`
+// one USD bought on that date. Written forward by a daily cron and backfilled from a historical
+// source (see scripts/backfill-fx-rates.ts), so that a transaction entered after the fact is
+// valued at the rate of its own `date` rather than the rate of the day it was typed in.
+model FxRate {
+  date      DateTime @db.Date
+  currency  String
+  rate      Decimal  @db.Decimal(20, 10)
+  // Where the row came from: "er-api" (daily snapshot) or "frankfurter" (historical backfill).
+  source    String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@id([date, currency])
+  @@index([currency, date])
+  @@map("fx_rates")
+}
+
+// An actual exchange of one currency for another: 100 USD handed over, 3 180 THB received. Not an
+// income and not an expense — net worth barely changes — so it stays out of both, and moves money
+// between the per-currency balances instead. Recording the amounts the user really got is also
+// what makes the cost of converting a measured number rather than a guessed percentage.
+model CurrencyExchange {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  fromCurrency String   @map("from_currency")
+  fromAmount   Decimal  @map("from_amount") @db.Decimal(12, 2)
+  toCurrency   String   @map("to_currency")
+  toAmount     Decimal  @map("to_amount") @db.Decimal(12, 2)
+  description  String   @default("")
+  date         DateTime @db.Date
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, date])
+  @@map("currency_exchanges")
 }

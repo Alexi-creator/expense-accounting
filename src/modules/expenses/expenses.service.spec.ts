@@ -2,6 +2,7 @@ import { NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CurrencyService } from '../currency/currency.service';
+import { FxRatesService } from '../currency/fx-rates.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import type { CreateExpenseDto } from './dto/create-expense.dto';
 import { ExpensesService } from './expenses.service';
@@ -29,6 +30,7 @@ describe('ExpensesService', () => {
     $transaction: jest.Mock;
   };
   let currency: { convert: jest.Mock; getRates: jest.Mock; approxTotalInBase: jest.Mock };
+  let fx: { convertOn: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
@@ -43,12 +45,14 @@ describe('ExpensesService', () => {
       $transaction: jest.fn(),
     };
     currency = { convert: jest.fn(), getRates: jest.fn(), approxTotalInBase: jest.fn() };
+    fx = { convertOn: jest.fn() };
 
     const module = await Test.createTestingModule({
       providers: [
         ExpensesService,
         { provide: PrismaService, useValue: prisma },
         { provide: CurrencyService, useValue: currency },
+        { provide: FxRatesService, useValue: fx },
         { provide: SubscriptionsService, useValue: { assertCanAddTransaction: jest.fn() } },
       ],
     }).compile();
@@ -58,13 +62,13 @@ describe('ExpensesService', () => {
 
   describe('create', () => {
     it('uses the provided currency and snapshots amountUsd at the current rate', async () => {
-      currency.convert.mockResolvedValue(42);
+      fx.convertOn.mockResolvedValue(42);
       prisma.expense.create.mockResolvedValue({ id: 'e1' });
       const dto = makeDto({ currency: 'THB' });
 
       const result = await service.create('u1', dto);
 
-      expect(currency.convert).toHaveBeenCalledWith(1500, 'THB', 'USD');
+      expect(fx.convertOn).toHaveBeenCalledWith(1500, 'THB', 'USD', expect.any(Date));
       expect(prisma.expense.create).toHaveBeenCalledWith({
         data: { ...dto, userId: 'u1', currency: 'THB', amountUsd: 42 },
       });
@@ -75,7 +79,7 @@ describe('ExpensesService', () => {
 
     it("falls back to the user's currency when none is given", async () => {
       prisma.user.findUnique.mockResolvedValue({ currency: 'EUR' });
-      currency.convert.mockResolvedValue(10);
+      fx.convertOn.mockResolvedValue(10);
       prisma.expense.create.mockResolvedValue({});
       const dto = makeDto({ amount: 9 });
 
@@ -85,7 +89,7 @@ describe('ExpensesService', () => {
         where: { id: 'u1' },
         select: { currency: true },
       });
-      expect(currency.convert).toHaveBeenCalledWith(9, 'EUR', 'USD');
+      expect(fx.convertOn).toHaveBeenCalledWith(9, 'EUR', 'USD', expect.any(Date));
       expect(prisma.expense.create).toHaveBeenCalledWith({
         data: { ...dto, userId: 'u1', currency: 'EUR', amountUsd: 10 },
       });
@@ -93,12 +97,12 @@ describe('ExpensesService', () => {
 
     it('defaults to USD when the user has no currency set', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
-      currency.convert.mockResolvedValue(5);
+      fx.convertOn.mockResolvedValue(5);
       prisma.expense.create.mockResolvedValue({});
 
       await service.create('u1', makeDto({ amount: 5 }));
 
-      expect(currency.convert).toHaveBeenCalledWith(5, 'USD', 'USD');
+      expect(fx.convertOn).toHaveBeenCalledWith(5, 'USD', 'USD', expect.any(Date));
     });
   });
 
@@ -120,13 +124,18 @@ describe('ExpensesService', () => {
 
   describe('update', () => {
     it('recomputes the amountUsd snapshot when the amount changes', async () => {
-      prisma.expense.findFirst.mockResolvedValue({ id: 'e1', amount: 100, currency: 'USD' });
-      currency.convert.mockResolvedValue(200);
+      prisma.expense.findFirst.mockResolvedValue({
+        id: 'e1',
+        amount: 100,
+        currency: 'USD',
+        date: new Date('2026-06-01T00:00:00Z'),
+      });
+      fx.convertOn.mockResolvedValue(200);
       prisma.expense.update.mockResolvedValue({});
 
       await service.update('e1', 'u1', { amount: 200 });
 
-      expect(currency.convert).toHaveBeenCalledWith(200, 'USD', 'USD');
+      expect(fx.convertOn).toHaveBeenCalledWith(200, 'USD', 'USD', expect.any(Date));
       expect(prisma.expense.update).toHaveBeenCalledWith({
         where: { id: 'e1' },
         data: { amount: 200, amountUsd: 200 },
@@ -134,12 +143,17 @@ describe('ExpensesService', () => {
     });
 
     it('leaves amountUsd untouched when neither amount nor currency changes', async () => {
-      prisma.expense.findFirst.mockResolvedValue({ id: 'e1', amount: 100, currency: 'USD' });
+      prisma.expense.findFirst.mockResolvedValue({
+        id: 'e1',
+        amount: 100,
+        currency: 'USD',
+        date: new Date('2026-06-01T00:00:00Z'),
+      });
       prisma.expense.update.mockResolvedValue({});
 
       await service.update('e1', 'u1', { description: 'updated' });
 
-      expect(currency.convert).not.toHaveBeenCalled();
+      expect(fx.convertOn).not.toHaveBeenCalled();
       expect(prisma.expense.update).toHaveBeenCalledWith({
         where: { id: 'e1' },
         data: { description: 'updated' },
@@ -147,12 +161,17 @@ describe('ExpensesService', () => {
     });
 
     it('skips the snapshot when amount and currency are sent but unchanged', async () => {
-      prisma.expense.findFirst.mockResolvedValue({ id: 'e1', amount: 100, currency: 'USD' });
+      prisma.expense.findFirst.mockResolvedValue({
+        id: 'e1',
+        amount: 100,
+        currency: 'USD',
+        date: new Date('2026-06-01T00:00:00Z'),
+      });
       prisma.expense.update.mockResolvedValue({});
 
       await service.update('e1', 'u1', { amount: 100, currency: 'USD', description: 'updated' });
 
-      expect(currency.convert).not.toHaveBeenCalled();
+      expect(fx.convertOn).not.toHaveBeenCalled();
       expect(prisma.expense.update).toHaveBeenCalledWith({
         where: { id: 'e1' },
         data: { amount: 100, currency: 'USD', description: 'updated' },
@@ -160,13 +179,18 @@ describe('ExpensesService', () => {
     });
 
     it('recomputes the snapshot when only the currency changes', async () => {
-      prisma.expense.findFirst.mockResolvedValue({ id: 'e1', amount: 100, currency: 'USD' });
-      currency.convert.mockResolvedValue(3.1);
+      prisma.expense.findFirst.mockResolvedValue({
+        id: 'e1',
+        amount: 100,
+        currency: 'USD',
+        date: new Date('2026-06-01T00:00:00Z'),
+      });
+      fx.convertOn.mockResolvedValue(3.1);
       prisma.expense.update.mockResolvedValue({});
 
       await service.update('e1', 'u1', { amount: 100, currency: 'THB' });
 
-      expect(currency.convert).toHaveBeenCalledWith(100, 'THB', 'USD');
+      expect(fx.convertOn).toHaveBeenCalledWith(100, 'THB', 'USD', expect.any(Date));
       expect(prisma.expense.update).toHaveBeenCalledWith({
         where: { id: 'e1' },
         data: { amount: 100, currency: 'THB', amountUsd: 3.1 },

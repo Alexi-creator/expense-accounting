@@ -9,6 +9,7 @@ import { AdminModule } from './modules/admin/admin.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { CurrencyModule } from './modules/currency/currency.module';
+import { ExchangesModule } from './modules/exchanges/exchanges.module';
 import { ExpenseCategoriesModule } from './modules/expense-categories/expense-categories.module';
 import { ExpensesModule } from './modules/expenses/expenses.module';
 import { GoalsModule } from './modules/goals/goals.module';
@@ -38,6 +39,7 @@ import { PrismaModule } from './prisma/prisma.module';
     IncomeCategoriesModule,
     IncomesModule,
     ExpensesModule,
+    ExchangesModule,
     GoalsModule,
     InvestingModule,
     TransactionsModule,

@@ -30,9 +30,10 @@ export class TransactionsController {
   @ApiOperation({
     summary: 'Overall all-time balance',
     description:
-      "Computes the user's total balance (all income minus all expenses) over the entire history. " +
-      'Since operations can be in different currencies, the amounts are brought to a common one: the value is returned in USD ' +
-      'and in the user\'s base currency (from the profile). Handy for a "current balance" widget on the dashboard.',
+      'All-time balance: income − expenses − whatever is reserved in active goals. Money is ' +
+      'summed inside each currency and returned per currency in `byCurrency` — those figures are ' +
+      'exact. `balance`/`balanceUsd` roll them into one number, converting only what is actually ' +
+      "held in a foreign currency at today's rate; `isApproximate` says whether that happened.",
   })
   @ApiOkResponse({ type: BalanceResponseDto })
   balance(@CurrentUser() user: { id: string }) {

@@ -44,7 +44,7 @@ export class IncomeCategoriesService {
 
     return categories.map((c) => {
       const groups = current.get(c.id) ?? [];
-      const approxTotal = this.currency.approxTotalInBase(groups, baseCurrency, rates, 'income');
+      const approxTotal = this.currency.approxTotalInBase(groups, baseCurrency, rates);
       const base = {
         id: c.id,
         name: c.name,
@@ -61,12 +61,7 @@ export class IncomeCategoriesService {
 
       // Comparison with the previous period: the previous period's total and the delta in the base currency.
       const prevGroups = previous.get(c.id) ?? [];
-      const previousApproxTotal = this.currency.approxTotalInBase(
-        prevGroups,
-        baseCurrency,
-        rates,
-        'income',
-      );
+      const previousApproxTotal = this.currency.approxTotalInBase(prevGroups, baseCurrency, rates);
       const deltaApproxTotal =
         approxTotal === null || previousApproxTotal === null
           ? null

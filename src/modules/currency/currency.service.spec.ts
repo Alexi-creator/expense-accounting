@@ -3,20 +3,11 @@ import { CurrencyService } from './currency.service';
 // rates[X] = units of X per 1 USD.
 const RATES = { EUR: 0.9, THB: 35 };
 
-// The fx spread is read from env at construction time, so build instances with an explicit spread.
-const makeService = (spread?: string) => {
-  const prev = process.env.FX_SPREAD;
-  if (spread === undefined) delete process.env.FX_SPREAD;
-  else process.env.FX_SPREAD = spread;
-  const service = new CurrencyService();
-  if (prev === undefined) delete process.env.FX_SPREAD;
-  else process.env.FX_SPREAD = prev;
-  return service;
-};
+const makeService = () => new CurrencyService();
 
 describe('CurrencyService', () => {
   describe('convertWithRates', () => {
-    const service = makeService('0');
+    const service = makeService();
 
     it('returns the amount unchanged for the same currency', () => {
       expect(service.convertWithRates(RATES, 100, 'EUR', 'EUR')).toBe(100);
@@ -40,27 +31,27 @@ describe('CurrencyService', () => {
 
   describe('convert', () => {
     it('short-circuits same-currency without fetching rates', async () => {
-      const service = makeService('0');
+      const service = makeService();
       const spy = jest.spyOn(service, 'getRates');
       await expect(service.convert(100, 'USD', 'USD')).resolves.toBe(100);
       expect(spy).not.toHaveBeenCalled();
     });
 
     it('uses the fetched rates for a real conversion', async () => {
-      const service = makeService('0');
+      const service = makeService();
       jest.spyOn(service, 'getRates').mockResolvedValue(RATES);
       await expect(service.convert(100, 'USD', 'EUR')).resolves.toBe(90);
     });
 
     it('returns null when rates are unavailable', async () => {
-      const service = makeService('0');
+      const service = makeService();
       jest.spyOn(service, 'getRates').mockResolvedValue(null);
       await expect(service.convert(100, 'USD', 'EUR')).resolves.toBeNull();
     });
   });
 
   describe('sumUsd', () => {
-    const service = makeService('0');
+    const service = makeService();
 
     it('returns 0 for no rows (without needing rates)', () => {
       expect(service.sumUsd([], null)).toBe(0);
@@ -81,7 +72,7 @@ describe('CurrencyService', () => {
   });
 
   describe('usdToBase', () => {
-    const service = makeService('0');
+    const service = makeService();
 
     it('converts USD into the base currency and rounds to 2 decimals', () => {
       expect(service.usdToBase(100, 'EUR', RATES)).toBe(90);
@@ -94,37 +85,40 @@ describe('CurrencyService', () => {
 
   describe('approxTotalInBase', () => {
     it('takes base-currency rows as-is, no rates needed', () => {
-      const service = makeService('0');
+      const service = makeService();
       const rows = [{ amount: 50, currency: 'EUR', amountUsd: null }];
-      expect(service.approxTotalInBase(rows, 'EUR', null, 'expense')).toBe(50);
+      expect(service.approxTotalInBase(rows, 'EUR', null)).toBe(50);
     });
 
     it('converts cross-currency rows via the USD snapshot', () => {
-      const service = makeService('0');
+      const service = makeService();
       const rows = [{ amount: 90, currency: 'EUR', amountUsd: 95 }];
-      // snapshot 95 USD, base USD → 95
-      expect(service.approxTotalInBase(rows, 'USD', RATES, 'none')).toBe(95);
+      // snapshot 95 USD, base USD -> 95
+      expect(service.approxTotalInBase(rows, 'USD', RATES)).toBe(95);
     });
 
-    it('applies the spread directionally on cross-currency rows', () => {
-      const service = makeService('0.1'); // 10% spread for an obvious assertion
+    it('never invents a conversion cost: totals are mid-market', () => {
+      const service = makeService();
       const rows = [{ amount: 90, currency: 'EUR', amountUsd: 100 }];
-      // expense costs more: 100 * 1.1
-      expect(service.approxTotalInBase(rows, 'USD', RATES, 'expense')).toBe(110);
-      // income received less: 100 * 0.9
-      expect(service.approxTotalInBase(rows, 'USD', RATES, 'income')).toBe(90);
+      // The same row is worth the same whether it is an expense or an income — a spread belongs
+      // to a real exchange the user records, not to every cross-currency row.
+      expect(service.approxTotalInBase(rows, 'USD', RATES)).toBe(100);
     });
 
-    it('does NOT apply the spread to base-currency rows', () => {
-      const service = makeService('0.1');
-      const rows = [{ amount: 50, currency: 'USD', amountUsd: null }];
-      expect(service.approxTotalInBase(rows, 'USD', RATES, 'expense')).toBe(50);
+    it('sums rows of several currencies, base ones untouched', () => {
+      const service = makeService();
+      const rows = [
+        { amount: 1000, currency: 'THB', amountUsd: null },
+        { amount: 100, currency: 'USD', amountUsd: 100 },
+      ];
+      // THB 1000 / 35 = 28.57 USD, plus the 100 USD row taken as-is.
+      expect(service.approxTotalInBase(rows, 'USD', RATES)).toBe(128.57);
     });
 
     it('returns null when a cross-currency row without a snapshot needs missing rates', () => {
-      const service = makeService('0');
+      const service = makeService();
       const rows = [{ amount: 90, currency: 'EUR', amountUsd: null }];
-      expect(service.approxTotalInBase(rows, 'USD', null, 'expense')).toBeNull();
+      expect(service.approxTotalInBase(rows, 'USD', null)).toBeNull();
     });
   });
 });

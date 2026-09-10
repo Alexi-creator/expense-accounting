@@ -56,3 +56,32 @@ pg_restore --clean --if-exists --dbname="$TARGET_DATABASE_URL" restore.dump
 ```
 
 > Test a restore into a throwaway DB now and then — an untested backup is a guess.
+
+---
+
+# FX rate history backfill
+
+`fx_rates` stores one USD rate per currency per day. A cron in the app appends today's rates every
+night, so history grows on its own — but it starts empty, and it has nothing for the dates of
+transactions entered before it existed.
+
+`scripts/backfill-fx-rates.ts` fills that gap: it pulls the daily series covering every transaction
+already on record, then re-snapshots each income/expense (`amount_usd`) at the rate of its **own
+operation date**. Previously the snapshot was taken at the rate of the day the row was typed in, so
+anything entered after the fact was valued at the wrong rate.
+
+```bash
+# see what would change, without writing
+docker compose run --rm app npx ts-node scripts/backfill-fx-rates.ts --dry-run
+
+# apply
+docker compose run --rm app npx ts-node scripts/backfill-fx-rates.ts
+```
+
+Safe to re-run: rates already on record are kept, and re-snapshotting is idempotent.
+
+The historical source is the ECB series (~30 major currencies). Anything outside that list keeps
+the snapshot it already has, and gets correct history from the day the nightly cron first runs.
+
+> This does not affect `/transactions/balance`, which sums each currency natively and never reads
+> these snapshots. It affects reports that value past operations in a single currency.

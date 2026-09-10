@@ -84,7 +84,7 @@ describe('summary.util', () => {
     ];
 
     it('groups per currency within a bucket without summing across currencies', () => {
-      const result = aggregateSummary(rows, ['2026-06-15'], 'day', 'USD', {}, currency, 'expense');
+      const result = aggregateSummary(rows, ['2026-06-15'], 'day', 'USD', {}, currency);
       const bucket = result.buckets[0];
 
       const usd = bucket.totals.find((t) => t.currency === 'USD');

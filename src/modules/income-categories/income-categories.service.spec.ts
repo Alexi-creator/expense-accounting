@@ -47,7 +47,7 @@ describe('IncomeCategoriesService', () => {
       prisma.user.findUnique.mockResolvedValue({ currency: 'USD' });
     });
 
-    it('aggregates groups with the income flow direction', async () => {
+    it('aggregates groups into the base currency', async () => {
       prisma.income.groupBy.mockResolvedValue([
         {
           categoryId: 'c1',
@@ -61,12 +61,7 @@ describe('IncomeCategoriesService', () => {
       const res = await service.statsByCategory('u1');
 
       expect(res[0]).toMatchObject({ count: 2, approxTotal: 5000, baseCurrency: 'USD' });
-      expect(currency.approxTotalInBase).toHaveBeenCalledWith(
-        expect.any(Array),
-        'USD',
-        {},
-        'income',
-      );
+      expect(currency.approxTotalInBase).toHaveBeenCalledWith(expect.any(Array), 'USD', {});
     });
 
     it('computes the delta when comparing periods', async () => {

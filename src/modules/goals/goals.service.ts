@@ -294,8 +294,8 @@ export class GoalsService {
     const savedRows = goals.map((g) => toRow(g.currency, sums.get(g.id) ?? 0));
     const targetRows = goals.map((g) => toRow(g.currency, Number(g.targetAmount)));
 
-    const totalSaved = this.currency.approxTotalInBase(savedRows, baseCurrency, rates, 'none');
-    const totalTarget = this.currency.approxTotalInBase(targetRows, baseCurrency, rates, 'none');
+    const totalSaved = this.currency.approxTotalInBase(savedRows, baseCurrency, rates);
+    const totalTarget = this.currency.approxTotalInBase(targetRows, baseCurrency, rates);
     const totalRemaining =
       totalSaved !== null && totalTarget !== null
         ? Math.max(round2(totalTarget - totalSaved), 0)

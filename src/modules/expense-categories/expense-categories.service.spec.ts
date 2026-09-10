@@ -82,12 +82,7 @@ describe('ExpenseCategoriesService', () => {
       ]);
       // Only one groupBy call: no comparison period requested.
       expect(prisma.expense.groupBy).toHaveBeenCalledTimes(1);
-      expect(currency.approxTotalInBase).toHaveBeenCalledWith(
-        expect.any(Array),
-        'EUR',
-        {},
-        'expense',
-      );
+      expect(currency.approxTotalInBase).toHaveBeenCalledWith(expect.any(Array), 'EUR', {});
     });
 
     it('computes the delta against the previous period when a compare range is given', async () => {
