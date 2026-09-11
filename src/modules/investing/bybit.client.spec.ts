@@ -13,10 +13,20 @@ describe('BybitClient', () => {
     json: async () => ({ retCode: 0, retMsg: 'OK', result }),
   });
 
+  const realFetch = global.fetch;
+
   beforeEach(() => {
     client = new BybitClient({ get: () => undefined } as unknown as ConfigService);
     fetchMock = jest.fn().mockResolvedValue(okResponse({ list: [], nextPageCursor: '' }));
     global.fetch = fetchMock as unknown as typeof fetch;
+  });
+
+  // Every spec file shares one process under `bun test`, so anything patched onto a global has to
+  // be put back: a stubbed `fetch` or a frozen `Date.now` would otherwise leak into every file
+  // that runs after this one.
+  afterEach(() => {
+    global.fetch = realFetch;
+    jest.restoreAllMocks();
   });
 
   it('signs requests per the v5 scheme (timestamp + key + recvWindow + query)', async () => {

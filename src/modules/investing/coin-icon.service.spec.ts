@@ -21,6 +21,10 @@ describe('CoinIconService', () => {
     };
   });
 
+  // Spec files share one process under `bun test`, so a spy on a global (Date.now here) has to be
+  // restored or it stays frozen for every file that runs afterwards.
+  afterEach(() => jest.restoreAllMocks());
+
   it('indexes coins by uppercase ticker and serves repeat calls from the cache', async () => {
     const service = new CoinIconService(bybit as unknown as BybitClient, configWith(ENV));
 

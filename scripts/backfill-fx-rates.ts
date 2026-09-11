@@ -6,7 +6,7 @@
  * typed in — so anything entered after the fact was valued at the wrong rate. Safe to re-run:
  * rates already on record are kept, and re-snapshotting is idempotent.
  *
- *   docker compose run --rm app node scripts/backfill-fx-rates.ts
+ *   docker compose run --rm app bun scripts/backfill-fx-rates.ts
  *   ... --dry-run    to see what would change without writing
  */
 import { PrismaClient } from '@prisma/client';

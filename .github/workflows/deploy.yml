@@ -12,26 +12,30 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v5
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          node-version: 22
-          cache: npm
+          bun-version: 1.4.2
 
       - name: Install dependencies
-        run: npm ci
+        run: bun install --frozen-lockfile
 
       - name: Generate Prisma client
-        run: npx prisma generate
+        run: bunx prisma generate
 
       - name: Lint
-        run: npm run lint
+        run: bun run lint
+
+      # `bun test` transpiles without checking types, so this is the only step that would catch a
+      # type error in the specs. It has to stay a separate step.
+      - name: Typecheck
+        run: bun run typecheck
 
       - name: Run tests
-        run: npm test
+        run: bun run test
 
       - name: Build
-        run: npm run build
+        run: bun run build
 
   deploy:
     needs: test
@@ -98,7 +102,7 @@ jobs:
             echo "::endgroup::"
 
             echo "::group::Run migrations"
-            docker run --rm --env-file /opt/limebalance/.env --network host "$GHCR_IMAGE" npm run migration:run
+            docker run --rm --env-file /opt/limebalance/.env --network host "$GHCR_IMAGE" bun run migration:run
             echo "::endgroup::"
 
             echo "::group::Restart app"

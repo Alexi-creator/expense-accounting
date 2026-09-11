@@ -20,6 +20,10 @@ describe('PriceService', () => {
     service = new PriceService(bybit as unknown as BybitClient);
   });
 
+  // Spec files share one process under `bun test`, so a spy on a global (Date.now here) has to be
+  // restored or it stays frozen for every file that runs afterwards.
+  afterEach(() => jest.restoreAllMocks());
+
   it('indexes tickers and serves repeat calls from the cache', async () => {
     const prices = await service.getUsdPrices();
     await service.getUsdPrices();

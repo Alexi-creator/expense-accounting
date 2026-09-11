@@ -34,7 +34,7 @@
 
 | Layer            | Technology                                              |
 | ---------------- | ------------------------------------------------------- |
-| Runtime          | Node.js + TypeScript                                    |
+| Runtime          | Bun + TypeScript                                        |
 | Framework        | [NestJS 11](https://nestjs.com/) on [Fastify](https://fastify.dev/) |
 | Telegram bot     | [grammY](https://grammy.dev/)                           |
 | Database         | PostgreSQL via [Prisma 7](https://www.prisma.io/) ORM   |
@@ -130,18 +130,19 @@ make db-studio   # http://localhost:5555
 ## 🧑‍💻 Local (non-Docker) workflow
 
 ```bash
-npm install
+bun install
 
-npm run start:dev      # watch mode
-npm run start:prod     # run compiled build from dist/
+bun run start:dev      # watch mode, straight from src/
+bun run start:prod     # run compiled build from dist/
 
-npm run lint           # Biome checks
-npm run lint:fix       # Biome auto-fix
-npm run format         # Biome format
+bun run lint           # Biome checks
+bun run lint:fix       # Biome auto-fix
+bun run format         # Biome format
+bun run typecheck      # TypeScript 7 (tsgo), types only
 
-npm run test           # unit tests
-npm run test:e2e       # end-to-end tests
-npm run test:cov       # coverage
+bun run test           # unit tests
+bun run test:e2e       # end-to-end tests
+bun run test:cov       # coverage
 ```
 
 ---

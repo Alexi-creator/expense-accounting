@@ -7,20 +7,20 @@
   "license": "UNLICENSED",
   "scripts": {
     "build": "nest build",
-    "start": "nest start",
-    "start:dev": "nest start --watch",
-    "start:debug": "nest start --debug --watch",
-    "start:prod": "node dist/main",
+    "start": "bun src/main.ts",
+    "start:dev": "bun --watch src/main.ts",
+    "start:debug": "bun --inspect --watch src/main.ts",
+    "start:prod": "bun dist/main.js",
     "migration:run": "prisma migrate deploy",
     "lint": "biome check src test",
     "lint:fix": "biome check --write src test",
     "format": "biome format --write src test",
-    "typecheck": "node node_modules/tsgo/bin/tsc --noEmit",
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "test:cov": "jest --coverage",
-    "test:debug": "node --inspect-brk node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "typecheck": "bun node_modules/tsgo/bin/tsc --noEmit",
+    "test": "bun test src",
+    "test:watch": "bun --watch test src",
+    "test:cov": "bun test src --coverage",
+    "test:debug": "bun --inspect-brk test src",
+    "test:e2e": "bun test test"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",
@@ -57,8 +57,6 @@
     "@nestjs/cli": "^12.0.0",
     "@nestjs/schematics": "^12.0.0",
     "@nestjs/testing": "^11.0.1",
-    "@swc/core": "^1.16.2",
-    "@swc/jest": "^0.2.39",
     "@types/bcryptjs": "^2.4.6",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.0.0",
@@ -66,46 +64,8 @@
     "@types/passport-jwt": "^4.0.1",
     "@types/pg": "^8.20.0",
     "@types/supertest": "^7.0.0",
-    "jest": "^30.0.0",
-    "source-map-support": "^0.5.21",
     "supertest": "^7.0.0",
     "tsgo": "npm:typescript@^7.0.2",
     "typescript": "^6.0.3"
-  },
-  "jest": {
-    "moduleFileExtensions": [
-      "js",
-      "json",
-      "ts"
-    ],
-    "rootDir": "src",
-    "testRegex": ".*\\.spec\\.ts$",
-    "transform": {
-      "^.+\\.(t|j)s$": [
-        "@swc/jest",
-        {
-          "jsc": {
-            "target": "es2023",
-            "parser": {
-              "syntax": "typescript",
-              "decorators": true
-            },
-            "transform": {
-              "legacyDecorator": true,
-              "decoratorMetadata": true
-            }
-          },
-          "module": {
-            "type": "commonjs"
-          },
-          "sourceMaps": true
-        }
-      ]
-    },
-    "collectCoverageFrom": [
-      "**/*.(t|j)s"
-    ],
-    "coverageDirectory": "../coverage",
-    "testEnvironment": "node"
   }
 }
