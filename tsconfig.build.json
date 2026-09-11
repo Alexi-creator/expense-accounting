@@ -1,10 +1,13 @@
 {
   "extends": "./tsconfig.json",
-  // `scripts` matters as much as the rest here: tsconfig.json has no `include`, so TypeScript
-  // compiles every .ts under the project root and infers rootDir from their common ancestor.
-  // One .ts file outside src/ moves that ancestor up and shifts the whole output into dist/src/,
-  // leaving the image without the dist/main.js it starts from. Standalone scripts are run with
-  // ts-node against tsconfig.json and never need building.
+  "compilerOptions": {
+    // The production stage starts `node dist/main.js`. Without an explicit `rootDir`, TypeScript
+    // infers it from the common ancestor of every compiled file, so one stray .ts outside src/
+    // would shift the whole output into dist/src/ and leave the image without its entrypoint.
+    // Pinning it here makes that impossible — and TypeScript 7 requires it to be explicit anyway.
+    "rootDir": "./src"
+  },
+  // Standalone scripts are run directly with `node` against tsconfig.json and never need building.
   "exclude": [
     "node_modules",
     "test",

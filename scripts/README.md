@@ -72,10 +72,10 @@ anything entered after the fact was valued at the wrong rate.
 
 ```bash
 # see what would change, without writing
-docker compose run --rm app npx ts-node scripts/backfill-fx-rates.ts --dry-run
+docker compose run --rm app node scripts/backfill-fx-rates.ts --dry-run
 
 # apply
-docker compose run --rm app npx ts-node scripts/backfill-fx-rates.ts
+docker compose run --rm app node scripts/backfill-fx-rates.ts
 ```
 
 Safe to re-run: rates already on record are kept, and re-snapshotting is idempotent.
