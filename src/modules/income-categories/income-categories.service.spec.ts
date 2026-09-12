@@ -2,8 +2,12 @@ import { NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CurrencyService } from '../currency/currency.service';
+import { FxRatesService } from '../currency/fx-rates.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { IncomeCategoriesService } from './income-categories.service';
+
+// Stand-in for the rate resolver FxRatesService hands back for the reported range.
+const RATE_AT = () => 1;
 
 describe('IncomeCategoriesService', () => {
   let service: IncomeCategoriesService;
@@ -12,7 +16,8 @@ describe('IncomeCategoriesService', () => {
     income: { groupBy: jest.Mock };
     user: { findUnique: jest.Mock };
   };
-  let currency: { getRates: jest.Mock; approxTotalInBase: jest.Mock };
+  let currency: { getRates: jest.Mock; historicalTotalInBase: jest.Mock };
+  let fx: { resolverFor: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
@@ -20,13 +25,15 @@ describe('IncomeCategoriesService', () => {
       income: { groupBy: jest.fn() },
       user: { findUnique: jest.fn() },
     };
-    currency = { getRates: jest.fn().mockResolvedValue({}), approxTotalInBase: jest.fn() };
+    currency = { getRates: jest.fn().mockResolvedValue({}), historicalTotalInBase: jest.fn() };
+    fx = { resolverFor: jest.fn().mockResolvedValue(RATE_AT) };
 
     const module = await Test.createTestingModule({
       providers: [
         IncomeCategoriesService,
         { provide: PrismaService, useValue: prisma },
         { provide: CurrencyService, useValue: currency },
+        { provide: FxRatesService, useValue: fx },
         { provide: SubscriptionsService, useValue: { assertCanAddCategory: jest.fn() } },
       ],
     }).compile();
@@ -52,16 +59,21 @@ describe('IncomeCategoriesService', () => {
         {
           categoryId: 'c1',
           currency: 'USD',
+          date: new Date('2026-06-10'),
           _sum: { amount: 5000, amountUsd: 5000 },
           _count: { _all: 2 },
         },
       ]);
-      currency.approxTotalInBase.mockReturnValue(5000);
+      currency.historicalTotalInBase.mockReturnValue(5000);
 
       const res = await service.statsByCategory('u1');
 
       expect(res[0]).toMatchObject({ count: 2, approxTotal: 5000, baseCurrency: 'USD' });
-      expect(currency.approxTotalInBase).toHaveBeenCalledWith(expect.any(Array), 'USD', {});
+      expect(currency.historicalTotalInBase).toHaveBeenCalledWith(
+        expect.any(Array),
+        'USD',
+        RATE_AT,
+      );
     });
 
     it('computes the delta when comparing periods', async () => {
@@ -69,11 +81,12 @@ describe('IncomeCategoriesService', () => {
         {
           categoryId: 'c1',
           currency: 'USD',
+          date: new Date('2026-06-10'),
           _sum: { amount: 1, amountUsd: 1 },
           _count: { _all: 1 },
         },
       ]);
-      currency.approxTotalInBase.mockReturnValueOnce(120).mockReturnValueOnce(100);
+      currency.historicalTotalInBase.mockReturnValueOnce(120).mockReturnValueOnce(100);
 
       const res = await service.statsByCategory('u1', { compareFrom: new Date('2026-05-01') });
 

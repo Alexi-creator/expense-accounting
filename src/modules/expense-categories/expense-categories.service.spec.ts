@@ -2,8 +2,12 @@ import { NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CurrencyService } from '../currency/currency.service';
+import { FxRatesService } from '../currency/fx-rates.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { ExpenseCategoriesService } from './expense-categories.service';
+
+// Stand-in for the rate resolver FxRatesService hands back for the reported range.
+const RATE_AT = () => 1;
 
 describe('ExpenseCategoriesService', () => {
   let service: ExpenseCategoriesService;
@@ -12,7 +16,8 @@ describe('ExpenseCategoriesService', () => {
     expense: { groupBy: jest.Mock };
     user: { findUnique: jest.Mock };
   };
-  let currency: { getRates: jest.Mock; approxTotalInBase: jest.Mock };
+  let currency: { getRates: jest.Mock; historicalTotalInBase: jest.Mock };
+  let fx: { resolverFor: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
@@ -20,13 +25,15 @@ describe('ExpenseCategoriesService', () => {
       expense: { groupBy: jest.fn() },
       user: { findUnique: jest.fn() },
     };
-    currency = { getRates: jest.fn().mockResolvedValue({}), approxTotalInBase: jest.fn() };
+    currency = { getRates: jest.fn().mockResolvedValue({}), historicalTotalInBase: jest.fn() };
+    fx = { resolverFor: jest.fn().mockResolvedValue(RATE_AT) };
 
     const module = await Test.createTestingModule({
       providers: [
         ExpenseCategoriesService,
         { provide: PrismaService, useValue: prisma },
         { provide: CurrencyService, useValue: currency },
+        { provide: FxRatesService, useValue: fx },
         { provide: SubscriptionsService, useValue: { assertCanAddCategory: jest.fn() } },
       ],
     }).compile();
@@ -52,17 +59,19 @@ describe('ExpenseCategoriesService', () => {
         {
           categoryId: 'c1',
           currency: 'USD',
+          date: new Date('2026-06-10'),
           _sum: { amount: 100, amountUsd: 100 },
           _count: { _all: 2 },
         },
         {
           categoryId: 'c1',
           currency: 'EUR',
+          date: new Date('2026-06-10'),
           _sum: { amount: 50, amountUsd: 55 },
           _count: { _all: 1 },
         },
       ]);
-      currency.approxTotalInBase.mockReturnValue(140);
+      currency.historicalTotalInBase.mockReturnValue(140);
 
       const res = await service.statsByCategory('u1');
 
@@ -82,7 +91,11 @@ describe('ExpenseCategoriesService', () => {
       ]);
       // Only one groupBy call: no comparison period requested.
       expect(prisma.expense.groupBy).toHaveBeenCalledTimes(1);
-      expect(currency.approxTotalInBase).toHaveBeenCalledWith(expect.any(Array), 'EUR', {});
+      expect(currency.historicalTotalInBase).toHaveBeenCalledWith(
+        expect.any(Array),
+        'EUR',
+        RATE_AT,
+      );
     });
 
     it('computes the delta against the previous period when a compare range is given', async () => {
@@ -91,6 +104,7 @@ describe('ExpenseCategoriesService', () => {
           {
             categoryId: 'c1',
             currency: 'USD',
+            date: new Date('2026-06-10'),
             _sum: { amount: 100, amountUsd: 100 },
             _count: { _all: 1 },
           },
@@ -99,11 +113,12 @@ describe('ExpenseCategoriesService', () => {
           {
             categoryId: 'c1',
             currency: 'USD',
+            date: new Date('2026-06-10'),
             _sum: { amount: 60, amountUsd: 60 },
             _count: { _all: 1 },
           },
         ]);
-      currency.approxTotalInBase.mockReturnValueOnce(100).mockReturnValueOnce(60);
+      currency.historicalTotalInBase.mockReturnValueOnce(100).mockReturnValueOnce(60);
 
       const res = await service.statsByCategory('u1', { compareFrom: new Date('2026-05-01') });
 
@@ -117,7 +132,7 @@ describe('ExpenseCategoriesService', () => {
 
     it('returns a null delta when either total is unavailable', async () => {
       prisma.expense.groupBy.mockResolvedValue([]);
-      currency.approxTotalInBase.mockReturnValueOnce(null).mockReturnValueOnce(60);
+      currency.historicalTotalInBase.mockReturnValueOnce(null).mockReturnValueOnce(60);
 
       const res = await service.statsByCategory('u1', { compareTo: new Date('2026-05-31') });
 

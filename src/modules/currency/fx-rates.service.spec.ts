@@ -6,7 +6,12 @@ import { FxRatesService, toDay } from './fx-rates.service';
 describe('FxRatesService', () => {
   let service: FxRatesService;
   let prisma: {
-    fxRate: { findFirst: jest.Mock; createMany: jest.Mock; update: jest.Mock };
+    fxRate: {
+      findFirst: jest.Mock;
+      findMany: jest.Mock;
+      createMany: jest.Mock;
+      update: jest.Mock;
+    };
     $queryRaw: jest.Mock;
   };
   let currency: { getRates: jest.Mock };
@@ -15,6 +20,7 @@ describe('FxRatesService', () => {
     prisma = {
       fxRate: {
         findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
         createMany: jest.fn().mockResolvedValue({ count: 0 }),
         update: jest.fn(),
       },
@@ -76,6 +82,65 @@ describe('FxRatesService', () => {
     it('short-circuits a same-currency conversion', async () => {
       expect(await service.convertOn(100, 'THB', 'THB', new Date())).toBe(100);
       expect(prisma.fxRate.findFirst).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('resolverFor', () => {
+    const day = (iso: string) => new Date(`${iso}T00:00:00Z`);
+    const FROM = day('2026-06-01');
+    const TO = day('2026-06-30');
+
+    it('answers each date with the newest rate not later than it', async () => {
+      prisma.fxRate.findMany.mockResolvedValue([
+        { currency: 'THB', date: day('2026-06-05'), rate: '35' },
+        { currency: 'THB', date: day('2026-06-20'), rate: '36' },
+      ]);
+
+      const rateAt = await service.resolverFor(['THB'], FROM, TO);
+
+      expect(rateAt('THB', day('2026-06-05'))).toBe(35);
+      // Nothing recorded on the 10th — the 5th's rate carries forward, as rateOn does.
+      expect(rateAt('THB', day('2026-06-10'))).toBe(35);
+      expect(rateAt('THB', day('2026-06-25'))).toBe(36);
+      // One query for the whole range, not one per date asked about.
+      expect(prisma.fxRate.findMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('carries a rate from before the range into its earliest dates', async () => {
+      prisma.fxRate.findMany.mockResolvedValue([
+        { currency: 'THB', date: day('2026-06-20'), rate: '36' },
+      ]);
+      prisma.$queryRaw.mockResolvedValue([{ currency: 'THB', rate: '34' }]);
+
+      const rateAt = await service.resolverFor(['THB'], FROM, TO);
+
+      expect(rateAt('THB', day('2026-06-02'))).toBe(34);
+      expect(rateAt('THB', day('2026-06-20'))).toBe(36);
+    });
+
+    it('falls back to today only for a currency the table has never held', async () => {
+      const rateAt = await service.resolverFor(['THB'], FROM, TO);
+
+      // Neither the range nor the seed knows THB; the live rate is the last resort.
+      expect(rateAt('THB', day('2026-06-15'))).toBe(32.9);
+      expect(rateAt('XYZ', day('2026-06-15'))).toBeNull();
+    });
+
+    it('never looks up USD, and needs no query when USD is all that was asked for', async () => {
+      const rateAt = await service.resolverFor(['USD'], FROM, TO);
+
+      expect(rateAt('USD', day('2026-06-15'))).toBe(1);
+      expect(prisma.fxRate.findMany).not.toHaveBeenCalled();
+      expect(currency.getRates).not.toHaveBeenCalled();
+    });
+
+    it('loads the whole history of a currency for an open-ended range', async () => {
+      await service.resolverFor(['THB'], undefined, TO);
+
+      const { where } = prisma.fxRate.findMany.mock.calls[0][0];
+      expect(where.date).toEqual({ lte: toDay(TO) });
+      // No lower bound means no seed query either — the range already reaches back far enough.
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
     });
   });
 

@@ -29,8 +29,8 @@ describe('ExpensesService', () => {
     user: { findUnique: jest.Mock };
     $transaction: jest.Mock;
   };
-  let currency: { convert: jest.Mock; getRates: jest.Mock; approxTotalInBase: jest.Mock };
-  let fx: { convertOn: jest.Mock };
+  let currency: { convert: jest.Mock; getRates: jest.Mock; historicalTotalInBase: jest.Mock };
+  let fx: { convertOn: jest.Mock; resolverFor: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
@@ -44,8 +44,8 @@ describe('ExpensesService', () => {
       user: { findUnique: jest.fn() },
       $transaction: jest.fn(),
     };
-    currency = { convert: jest.fn(), getRates: jest.fn(), approxTotalInBase: jest.fn() };
-    fx = { convertOn: jest.fn() };
+    currency = { convert: jest.fn(), getRates: jest.fn(), historicalTotalInBase: jest.fn() };
+    fx = { convertOn: jest.fn(), resolverFor: jest.fn().mockResolvedValue(() => 1) };
 
     const module = await Test.createTestingModule({
       providers: [
@@ -270,7 +270,7 @@ describe('ExpensesService', () => {
       prisma.user.findUnique.mockResolvedValue({ currency: 'RUB', timezone: 'UTC' });
       currency.getRates.mockResolvedValue({});
       // Total = plain sum of the group amounts — enough to verify wiring.
-      currency.approxTotalInBase.mockImplementation(
+      currency.historicalTotalInBase.mockImplementation(
         (groups: { amount: number }[]) => groups.reduce((s, g) => s + g.amount, 0) || null,
       );
     });

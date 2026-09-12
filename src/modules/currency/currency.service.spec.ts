@@ -71,18 +71,6 @@ describe('CurrencyService', () => {
     });
   });
 
-  describe('usdToBase', () => {
-    const service = makeService();
-
-    it('converts USD into the base currency and rounds to 2 decimals', () => {
-      expect(service.usdToBase(100, 'EUR', RATES)).toBe(90);
-    });
-
-    it('returns null without rates', () => {
-      expect(service.usdToBase(100, 'EUR', null)).toBeNull();
-    });
-  });
-
   describe('approxTotalInBase', () => {
     it('takes base-currency rows as-is, no rates needed', () => {
       const service = makeService();
@@ -119,6 +107,58 @@ describe('CurrencyService', () => {
       const service = makeService();
       const rows = [{ amount: 90, currency: 'EUR', amountUsd: null }];
       expect(service.approxTotalInBase(rows, 'USD', null)).toBeNull();
+    });
+  });
+
+  describe('historicalTotalInBase', () => {
+    const MARCH = new Date('2025-03-10T00:00:00Z');
+    const TODAY = new Date('2026-09-10T00:00:00Z');
+    // A base currency that has lost value: 1 USD bought 1 000 of it in March, 1 400 now.
+    const rateAt = (currency: string, date: Date) => {
+      if (currency === 'USD') return 1;
+      if (currency !== 'ARS') return null;
+      return date.getTime() <= MARCH.getTime() ? 1000 : 1400;
+    };
+
+    it('values a row at its own date, not at the newest rate', () => {
+      const service = makeService();
+      const march = [{ amount: 100, currency: 'USD', amountUsd: 100, date: MARCH }];
+      // 100 USD spent in March was worth 100 000, and stays worth 100 000 however far the rate
+      // moves afterwards. Valuing it at today's rate would inflate it to 140 000 instead.
+      expect(service.historicalTotalInBase(march, 'ARS', rateAt)).toBe(100000);
+      const today = [{ amount: 100, currency: 'USD', amountUsd: 100, date: TODAY }];
+      expect(service.historicalTotalInBase(today, 'ARS', rateAt)).toBe(140000);
+    });
+
+    it('takes base-currency rows as they are, without consulting a rate', () => {
+      const service = makeService();
+      const rows = [{ amount: 50, currency: 'EUR', amountUsd: 55, date: MARCH }];
+      const never = () => {
+        throw new Error('no rate should be needed');
+      };
+      expect(service.historicalTotalInBase(rows, 'EUR', never)).toBe(50);
+    });
+
+    it('values a row with no USD snapshot at its own date too', () => {
+      const service = makeService();
+      // Legacy row, no amountUsd: ARS 100 000 in March was 100 USD, and the base is USD.
+      const rows = [{ amount: 100000, currency: 'ARS', amountUsd: null, date: MARCH }];
+      expect(service.historicalTotalInBase(rows, 'USD', rateAt)).toBe(100);
+    });
+
+    it('sums rows of several dates, each at the rate that held then', () => {
+      const service = makeService();
+      const rows = [
+        { amount: 100, currency: 'USD', amountUsd: 100, date: MARCH },
+        { amount: 100, currency: 'USD', amountUsd: 100, date: TODAY },
+      ];
+      expect(service.historicalTotalInBase(rows, 'ARS', rateAt)).toBe(240000);
+    });
+
+    it('returns null when the base currency rate is unknown for a row', () => {
+      const service = makeService();
+      const rows = [{ amount: 100, currency: 'USD', amountUsd: 100, date: MARCH }];
+      expect(service.historicalTotalInBase(rows, 'XXX', () => null)).toBeNull();
     });
   });
 });

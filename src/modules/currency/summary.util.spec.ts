@@ -72,10 +72,12 @@ describe('summary.util', () => {
   });
 
   describe('aggregateSummary', () => {
-    // Stub: aggregateSummary only calls approxTotalInBase; return a sentinel.
+    // Stub: aggregateSummary only calls historicalTotalInBase; return a sentinel.
     const currency = {
-      approxTotalInBase: jest.fn().mockReturnValue(999),
+      historicalTotalInBase: jest.fn().mockReturnValue(999),
     } as unknown as CurrencyService;
+    // Stand-in resolver — the stub above never consults it.
+    const rateAt = () => 1;
 
     const rows: SummaryRow[] = [
       { amount: 10, amountUsd: 10, currency: 'USD', date: d(2026, 6, 15) },
@@ -84,7 +86,7 @@ describe('summary.util', () => {
     ];
 
     it('groups per currency within a bucket without summing across currencies', () => {
-      const result = aggregateSummary(rows, ['2026-06-15'], 'day', 'USD', {}, currency);
+      const result = aggregateSummary(rows, ['2026-06-15'], 'day', 'USD', rateAt, currency);
       const bucket = result.buckets[0];
 
       const usd = bucket.totals.find((t) => t.currency === 'USD');
@@ -100,7 +102,7 @@ describe('summary.util', () => {
         ['2026-06-14', '2026-06-15'],
         'day',
         'USD',
-        {},
+        rateAt,
         currency,
       );
       expect(result.buckets[0]).toMatchObject({ bucket: '2026-06-14', totals: [] });
@@ -108,7 +110,7 @@ describe('summary.util', () => {
     });
 
     it('reports the chosen base currency and granularity', () => {
-      const result = aggregateSummary(rows, ['2026-06-15'], 'day', 'EUR', {}, currency);
+      const result = aggregateSummary(rows, ['2026-06-15'], 'day', 'EUR', rateAt, currency);
       expect(result.baseCurrency).toBe('EUR');
       expect(result.granularity).toBe('day');
     });

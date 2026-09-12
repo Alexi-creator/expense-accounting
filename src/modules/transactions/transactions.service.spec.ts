@@ -1,12 +1,17 @@
 import { Test } from '@nestjs/testing';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CurrencyService } from '../currency/currency.service';
+import { FxRatesService } from '../currency/fx-rates.service';
 import { ExchangesService } from '../exchanges/exchanges.service';
 import { GoalsService } from '../goals/goals.service';
 import { TransactionsService } from './transactions.service';
 
 // rates[X] = units of X per 1 USD.
 const RATES = { EUR: 0.9, THB: 32 };
+
+// The date every page row in these tests carries, and the stand-in resolver built for its span.
+const DAY = new Date('2026-06-15T00:00:00Z');
+const RATE_AT = () => 1;
 
 describe('TransactionsService', () => {
   let service: TransactionsService;
@@ -16,9 +21,10 @@ describe('TransactionsService', () => {
     expense: { groupBy: jest.Mock };
     user: { findUnique: jest.Mock };
   };
+  let fx: { resolverFor: jest.Mock };
   let currency: {
     getRates: jest.Mock;
-    approxTotalInBase: jest.Mock;
+    historicalTotalInBase: jest.Mock;
     usdToBase: jest.Mock;
     convertWithRates: jest.Mock;
   };
@@ -32,9 +38,10 @@ describe('TransactionsService', () => {
       expense: { groupBy: jest.fn() },
       user: { findUnique: jest.fn().mockResolvedValue({ currency: 'USD' }) },
     };
+    fx = { resolverFor: jest.fn().mockResolvedValue(RATE_AT) };
     currency = {
       getRates: jest.fn().mockResolvedValue(RATES),
-      approxTotalInBase: jest.fn(),
+      historicalTotalInBase: jest.fn(),
       usdToBase: jest.fn(),
       // The real pure implementation: the balance is arithmetic, and mocking it away is exactly
       // what let the old rounding bug hide.
@@ -52,6 +59,7 @@ describe('TransactionsService', () => {
         TransactionsService,
         { provide: PrismaService, useValue: prisma },
         { provide: CurrencyService, useValue: currency },
+        { provide: FxRatesService, useValue: fx },
         { provide: GoalsService, useValue: goals },
         { provide: ExchangesService, useValue: exchanges },
       ],
@@ -65,12 +73,12 @@ describe('TransactionsService', () => {
       // Raw queries, in call order: items, count.
       prisma.$queryRaw
         .mockResolvedValueOnce([
-          { id: 'i1', type: 'income', currency: 'USD', amount: 200, amountUsd: 200 },
-          { id: 'e1', type: 'expense', currency: 'USD', amount: 50, amountUsd: 50 },
+          { id: 'i1', type: 'income', currency: 'USD', amount: 200, amountUsd: 200, date: DAY },
+          { id: 'e1', type: 'expense', currency: 'USD', amount: 50, amountUsd: 50, date: DAY },
         ])
         .mockResolvedValueOnce([{ count: 12n }]);
-      // approxTotalInBase order: income first, then expense.
-      currency.approxTotalInBase.mockReturnValueOnce(200).mockReturnValueOnce(50);
+      // historicalTotalInBase order: income first, then expense.
+      currency.historicalTotalInBase.mockReturnValueOnce(200).mockReturnValueOnce(50);
 
       const res = await service.findAll('u1', { page: 2, limit: 5 });
 
@@ -80,22 +88,22 @@ describe('TransactionsService', () => {
       expect(res.totalPages).toBe(3); // ceil(12 / 5)
       expect(res.summary).toEqual({ baseCurrency: 'USD', income: 200, expense: 50, net: 150 });
       // The summary is derived from the page rows, split by type.
-      expect(currency.approxTotalInBase).toHaveBeenNthCalledWith(
+      expect(currency.historicalTotalInBase).toHaveBeenNthCalledWith(
         1,
-        [{ id: 'i1', type: 'income', currency: 'USD', amount: 200, amountUsd: 200 }],
+        [{ id: 'i1', type: 'income', currency: 'USD', amount: 200, amountUsd: 200, date: DAY }],
         'USD',
-        RATES,
+        RATE_AT,
       );
-      expect(currency.approxTotalInBase).toHaveBeenNthCalledWith(
+      expect(currency.historicalTotalInBase).toHaveBeenNthCalledWith(
         2,
-        [{ id: 'e1', type: 'expense', currency: 'USD', amount: 50, amountUsd: 50 }],
+        [{ id: 'e1', type: 'expense', currency: 'USD', amount: 50, amountUsd: 50, date: DAY }],
         'USD',
-        RATES,
+        RATE_AT,
       );
       // amountUsd is internal and must not leak into the response items.
       expect(res.items).toEqual([
-        { id: 'i1', type: 'income', currency: 'USD', amount: 200 },
-        { id: 'e1', type: 'expense', currency: 'USD', amount: 50 },
+        { id: 'i1', type: 'income', currency: 'USD', amount: 200, date: DAY },
+        { id: 'e1', type: 'expense', currency: 'USD', amount: 50, date: DAY },
       ]);
     });
 
@@ -105,7 +113,7 @@ describe('TransactionsService', () => {
         .mockResolvedValueOnce([{ count: 0n }])
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([]);
-      currency.approxTotalInBase.mockReturnValueOnce(null).mockReturnValueOnce(50);
+      currency.historicalTotalInBase.mockReturnValueOnce(null).mockReturnValueOnce(50);
 
       const res = await service.findAll('u1', {});
 

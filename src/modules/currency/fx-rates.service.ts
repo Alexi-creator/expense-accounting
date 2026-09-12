@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CurrencyService, type Rates } from './currency.service';
+import { CurrencyService, type RateAt, type Rates } from './currency.service';
 
 const BASE = 'USD';
 // ECB daily reference rates with a historical range endpoint (~30 currencies), no key. Used to
@@ -16,6 +17,23 @@ export function toDay(date: Date): Date {
 
 function isoDay(date: Date): string {
   return toDay(date).toISOString().slice(0, 10);
+}
+
+/** Index of the last entry of an ascending array that is not greater than `target`; -1 if none. */
+function lastAtOrBefore(days: number[], target: number): number {
+  let lo = 0;
+  let hi = days.length - 1;
+  let found = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (days[mid] <= target) {
+      found = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return found;
 }
 
 /**
@@ -74,6 +92,69 @@ export class FxRatesService {
     const out: Rates = {};
     for (const r of rows) out[r.currency] = Number(r.rate);
     return out;
+  }
+
+  /**
+   * A rate lookup over [from, to] for `currencies` — what a period report needs to value every
+   * row at its own date without a query per row. `from` may be omitted for an open-ended range.
+   *
+   * Resolution order matches rateOn exactly, so a figure does not depend on which of the two
+   * found it: the newest row not later than the asked-for date, else the newest row from before
+   * the range began (markets close on weekends, and a missed cron leaves the same kind of gap),
+   * else today's live rate for a currency the table has never heard of.
+   */
+  async resolverFor(currencies: string[], from: Date | undefined, to: Date): Promise<RateAt> {
+    const wanted = [...new Set(currencies)].filter((c) => c !== BASE);
+    // Covers currencies missing from the table entirely; cached for 12h, so this is nearly free.
+    const live = wanted.length > 0 ? await this.currency.getRates() : null;
+    const fallback = (currency: string) => (currency === BASE ? 1 : (live?.[currency] ?? null));
+    if (wanted.length === 0) return fallback;
+
+    const [inRange, seeds] = await Promise.all([
+      this.prisma.fxRate.findMany({
+        where: {
+          currency: { in: wanted },
+          date: { ...(from ? { gte: toDay(from) } : {}), lte: toDay(to) },
+        },
+        select: { currency: true, date: true, rate: true },
+        orderBy: { date: 'asc' },
+      }),
+      from ? this.seedRates(wanted, toDay(from)) : Promise.resolve(new Map<string, number>()),
+    ]);
+
+    // currency -> its known days, ascending, so a date can be matched to the newest row not
+    // later than itself with a binary search rather than a scan per row.
+    const history = new Map<string, { days: number[]; rates: number[] }>();
+    for (const r of inRange) {
+      let entry = history.get(r.currency);
+      if (!entry) {
+        entry = { days: [], rates: [] };
+        history.set(r.currency, entry);
+      }
+      entry.days.push(r.date.getTime());
+      entry.rates.push(Number(r.rate));
+    }
+
+    return (currency, date) => {
+      if (currency === BASE) return 1;
+      const entry = history.get(currency);
+      if (entry) {
+        const i = lastAtOrBefore(entry.days, toDay(date).getTime());
+        if (i >= 0) return entry.rates[i];
+      }
+      return seeds.get(currency) ?? fallback(currency);
+    };
+  }
+
+  /** Newest rate strictly before `day`, per currency — the carry-forward seed for a range. */
+  private async seedRates(currencies: string[], day: Date): Promise<Map<string, number>> {
+    const rows = await this.prisma.$queryRaw<{ currency: string; rate: string }[]>`
+      SELECT DISTINCT ON (currency) currency, rate::text AS rate
+      FROM fx_rates
+      WHERE currency IN (${Prisma.join(currencies)}) AND date < ${day}::date
+      ORDER BY currency, date DESC
+    `;
+    return new Map(rows.map((r) => [r.currency, Number(r.rate)]));
   }
 
   /** Today's snapshot, so that history keeps growing without any manual step. */

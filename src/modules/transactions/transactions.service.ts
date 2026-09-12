@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CurrencyService, type Rates } from '../currency/currency.service';
+import { FxRatesService } from '../currency/fx-rates.service';
 import { ExchangesService } from '../exchanges/exchanges.service';
 import { GoalsService } from '../goals/goals.service';
 import { GetTransactionsDto, TransactionType } from './dto/get-transactions.dto';
@@ -25,6 +26,7 @@ export class TransactionsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly currency: CurrencyService,
+    private readonly fx: FxRatesService,
     private readonly goals: GoalsService,
     private readonly exchanges: ExchangesService,
   ) {}
@@ -79,7 +81,7 @@ export class TransactionsService {
           ? incomePartQuery
           : Prisma.sql`${expensePart} UNION ALL ${incomePartQuery}`;
 
-    const [items, countResult, user, rates] = await Promise.all([
+    const [items, countResult, user] = await Promise.all([
       this.prisma.$queryRaw<TransactionRow[]>`
         ${union}
         ORDER BY date DESC, "createdAt" DESC
@@ -89,15 +91,26 @@ export class TransactionsService {
         SELECT COUNT(*) AS count FROM (${union}) AS combined
       `,
       this.prisma.user.findUnique({ where: { id: userId }, select: { currency: true } }),
-      this.currency.getRates(),
     ]);
 
     const baseCurrency = user?.currency ?? 'USD';
     // The monetary total is computed over the current page (items), not the whole result set.
     const incomeRows = items.filter((r) => r.type === 'income');
     const expenseRows = items.filter((r) => r.type === 'expense');
-    const income = this.currency.approxTotalInBase(incomeRows, baseCurrency, rates);
-    const expense = this.currency.approxTotalInBase(expenseRows, baseCurrency, rates);
+    // Rates over the dates this page actually spans — each row is worth what it was worth on its
+    // own date, so scrolling back to an old page shows the same total it showed last year. An
+    // empty page needs none of them: both totals are 0 whatever the rates did.
+    const times = items.map((r) => r.date.getTime());
+    const rateAt =
+      times.length > 0
+        ? await this.fx.resolverFor(
+            [baseCurrency, ...items.map((r) => r.currency)],
+            new Date(Math.min(...times)),
+            new Date(Math.max(...times)),
+          )
+        : () => null;
+    const income = this.currency.historicalTotalInBase(incomeRows, baseCurrency, rateAt);
+    const expense = this.currency.historicalTotalInBase(expenseRows, baseCurrency, rateAt);
     // net is known only if both totals were computed (rates available).
     const net =
       income === null || expense === null ? null : Math.round((income - expense) * 100) / 100;

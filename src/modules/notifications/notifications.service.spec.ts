@@ -1,6 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CurrencyService } from '../currency/currency.service';
+import { FxRatesService } from '../currency/fx-rates.service';
 import { NotificationsService } from './notifications.service';
 
 describe('NotificationsService', () => {
@@ -22,7 +23,8 @@ describe('NotificationsService', () => {
       upsert: jest.Mock;
     };
   };
-  let currency: { getRates: jest.Mock; approxTotalInBase: jest.Mock };
+  let currency: { getRates: jest.Mock; historicalTotalInBase: jest.Mock };
+  let fx: { resolverFor: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
@@ -42,13 +44,15 @@ describe('NotificationsService', () => {
         upsert: jest.fn().mockResolvedValue({}),
       },
     };
-    currency = { getRates: jest.fn().mockResolvedValue({}), approxTotalInBase: jest.fn() };
+    currency = { getRates: jest.fn().mockResolvedValue({}), historicalTotalInBase: jest.fn() };
+    fx = { resolverFor: jest.fn().mockResolvedValue(() => 1) };
 
     const module = await Test.createTestingModule({
       providers: [
         NotificationsService,
         { provide: PrismaService, useValue: prisma },
         { provide: CurrencyService, useValue: currency },
+        { provide: FxRatesService, useValue: fx },
       ],
     }).compile();
 
@@ -68,13 +72,23 @@ describe('NotificationsService', () => {
     it('upserts the monthly summary keyed by period without touching isRead', async () => {
       jest.useFakeTimers().setSystemTime(new Date('2026-06-21T00:00:00Z'));
       prisma.income.groupBy.mockResolvedValue([
-        { currency: 'USD', _sum: { amount: 100, amountUsd: 100 } },
+        {
+          currency: 'USD',
+          date: new Date('2026-06-10T00:00:00Z'),
+          _sum: { amount: 100, amountUsd: 100 },
+        },
       ]);
       prisma.expense.groupBy
-        .mockResolvedValueOnce([{ currency: 'USD', _sum: { amount: 40, amountUsd: 40 } }]) // by currency
+        .mockResolvedValueOnce([
+          {
+            currency: 'USD',
+            date: new Date('2026-06-10T00:00:00Z'),
+            _sum: { amount: 40, amountUsd: 40 },
+          },
+        ]) // by currency and date
         .mockResolvedValueOnce([{ categoryId: 'c1', _sum: { amountUsd: 40 } }]); // top category
       prisma.expenseCategory.findUnique.mockResolvedValue({ name: 'Рестораны', emoji: '🍽️' });
-      currency.approxTotalInBase.mockReturnValueOnce(100).mockReturnValueOnce(40); // income, expense
+      currency.historicalTotalInBase.mockReturnValueOnce(100).mockReturnValueOnce(40); // income, expense
       prisma.notification.findMany.mockResolvedValue([
         {
           id: 'n1',

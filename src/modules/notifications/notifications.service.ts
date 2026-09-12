@@ -1,14 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CurrencyService } from '../currency/currency.service';
+import { CurrencyService, type DatedRow } from '../currency/currency.service';
+import { FxRatesService } from '../currency/fx-rates.service';
 import { NotificationDto, NotificationsResponseDto } from './dto/notification-response.dto';
-
-interface CurrencyGroup {
-  currency: string;
-  amount: number;
-  amountUsd: number | null;
-}
 
 // Proactive Telegram bot pushes the user can individually opt out of. Extend this list to add a
 // new toggle — any type not in here (or without a stored row) is enabled by default.
@@ -20,6 +15,7 @@ export class NotificationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly currency: CurrencyService,
+    private readonly fx: FxRatesService,
   ) {}
 
   /**
@@ -118,19 +114,18 @@ export class NotificationsService {
     const period = `${year}-${String(month + 1).padStart(2, '0')}`;
     const dateRange = { gte: monthStart, lt: nextMonthStart };
 
-    const [incomeGroups, expenseGroups, user, rates, topExpenseGroup] = await Promise.all([
+    const [incomeGroups, expenseGroups, user, topExpenseGroup] = await Promise.all([
       this.prisma.income.groupBy({
-        by: ['currency'],
+        by: ['currency', 'date'],
         where: { userId, date: dateRange },
         _sum: { amount: true, amountUsd: true },
       }),
       this.prisma.expense.groupBy({
-        by: ['currency'],
+        by: ['currency', 'date'],
         where: { userId, date: dateRange },
         _sum: { amount: true, amountUsd: true },
       }),
       this.prisma.user.findUnique({ where: { id: userId }, select: { currency: true } }),
-      this.currency.getRates(),
       this.prisma.expense.groupBy({
         by: ['categoryId'],
         where: { userId, date: dateRange },
@@ -142,16 +137,25 @@ export class NotificationsService {
 
     if (incomeGroups.length === 0 && expenseGroups.length === 0) return null;
 
-    const toRows = (groups: typeof incomeGroups): CurrencyGroup[] =>
+    const toRows = (groups: typeof incomeGroups): DatedRow[] =>
       groups.map((g) => ({
         currency: g.currency,
         amount: Number(g._sum.amount ?? 0),
         amountUsd: g._sum.amountUsd != null ? Number(g._sum.amountUsd) : null,
+        date: g.date,
       }));
 
     const baseCurrency = user?.currency ?? 'USD';
-    const income = this.currency.approxTotalInBase(toRows(incomeGroups), baseCurrency, rates);
-    const expense = this.currency.approxTotalInBase(toRows(expenseGroups), baseCurrency, rates);
+    const incomeRows = toRows(incomeGroups);
+    const expenseRows = toRows(expenseGroups);
+    // Each row at the rate of its own date, so this month's figures stop moving once it is over.
+    const rateAt = await this.fx.resolverFor(
+      [baseCurrency, ...incomeRows.map((r) => r.currency), ...expenseRows.map((r) => r.currency)],
+      monthStart,
+      nextMonthStart,
+    );
+    const income = this.currency.historicalTotalInBase(incomeRows, baseCurrency, rateAt);
+    const expense = this.currency.historicalTotalInBase(expenseRows, baseCurrency, rateAt);
     const net =
       income !== null && expense !== null ? Math.round((income - expense) * 100) / 100 : null;
 

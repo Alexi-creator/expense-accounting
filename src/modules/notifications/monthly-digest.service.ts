@@ -6,6 +6,7 @@ import { withEmoji } from '../../bot/handlers/category.util';
 import { resolveLocale, t } from '../../bot/i18n';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CurrencyService } from '../currency/currency.service';
+import { FxRatesService } from '../currency/fx-rates.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { NotificationsService } from './notifications.service';
 
@@ -40,6 +41,7 @@ export class MonthlyDigestService {
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
     private readonly currency: CurrencyService,
+    private readonly fx: FxRatesService,
     private readonly subscriptions: SubscriptionsService,
     private readonly bot: BotService,
   ) {}
@@ -172,13 +174,16 @@ export class MonthlyDigestService {
       where: { id: userId },
       select: { currency: true },
     });
-    const rates = await this.currency.getRates();
-    const amount = this.currency.usdToBase(
+    // Converted at the rate of the expense's own date: the digest recaps a month that is over, so
+    // its figures should read the same whenever the card is opened again.
+    const inBase = await this.fx.convertOn(
       Number(expense.amountUsd),
+      'USD',
       user?.currency ?? 'USD',
-      rates,
+      expense.date,
     );
-    if (amount === null) return null;
+    if (inBase === null) return null;
+    const amount = Math.round(inBase * 100) / 100;
 
     return { category: expense.category.name, emoji: expense.category.emoji, amount };
   }
@@ -193,27 +198,30 @@ export class MonthlyDigestService {
       gte: new Date(Date.UTC(year, month, 1)),
       lt: new Date(Date.UTC(year, month + 1, 1)),
     };
-    const [contributions, completedCount, rates] = await Promise.all([
+    const [contributions, completedCount] = await Promise.all([
       this.prisma.goalContribution.findMany({
         where: { userId, date: dateRange },
-        select: { amount: true, goal: { select: { currency: true } } },
+        select: { amount: true, date: true, goal: { select: { currency: true } } },
       }),
       this.prisma.goal.count({ where: { userId, completedAt: dateRange } }),
-      this.currency.getRates(),
     ]);
 
-    const contributed =
-      contributions.length === 0
-        ? 0
-        : this.currency.approxTotalInBase(
-            contributions.map((c) => ({
-              amount: Number(c.amount),
-              currency: c.goal.currency,
-              amountUsd: null,
-            })),
-            baseCurrency,
-            rates,
-          );
+    if (contributions.length === 0) return { contributed: 0, completedCount };
+
+    const rows = contributions.map((c) => ({
+      amount: Number(c.amount),
+      currency: c.goal.currency,
+      amountUsd: null,
+      date: c.date,
+    }));
+    // A contribution counts for what it was worth when it was made, same as every other figure
+    // in a digest for a month that has already closed.
+    const rateAt = await this.fx.resolverFor(
+      [baseCurrency, ...rows.map((r) => r.currency)],
+      dateRange.gte,
+      dateRange.lt,
+    );
+    const contributed = this.currency.historicalTotalInBase(rows, baseCurrency, rateAt);
 
     return { contributed, completedCount };
   }

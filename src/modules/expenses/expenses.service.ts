@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { localWallClockNow } from '../../common/timezone.util';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CurrencyService } from '../currency/currency.service';
+import { CurrencyService, type DatedRow } from '../currency/currency.service';
 import { FxRatesService } from '../currency/fx-rates.service';
 import { aggregateSummary, buildBuckets, type Granularity } from '../currency/summary.util';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
@@ -48,18 +48,23 @@ export class ExpensesService {
   async getSummary(userId: string, range: { from: Date; to: Date; granularity: Granularity }) {
     const { from, to, granularity } = range;
 
-    const [rows, user, rates] = await Promise.all([
+    const [rows, user] = await Promise.all([
       this.prisma.expense.findMany({
         where: { userId, date: { gte: from, lte: to } },
         select: { amount: true, amountUsd: true, currency: true, date: true },
       }),
       this.prisma.user.findUnique({ where: { id: userId }, select: { currency: true } }),
-      this.currency.getRates(),
     ]);
 
     const baseCurrency = user?.currency ?? 'USD';
+    // The period's rates in one query: each row is valued at its own date, never at today's.
+    const rateAt = await this.fx.resolverFor(
+      [baseCurrency, ...rows.map((r) => r.currency)],
+      from,
+      to,
+    );
     const bucketKeys = buildBuckets(from, to, granularity);
-    return aggregateSummary(rows, bucketKeys, granularity, baseCurrency, rates, this.currency);
+    return aggregateSummary(rows, bucketKeys, granularity, baseCurrency, rateAt, this.currency);
   }
 
   async findOne(id: string, userId: string) {
@@ -129,50 +134,50 @@ export class ExpensesService {
     const baseCurrency = user?.currency ?? 'USD';
     const { from, to } = this.getPeriodDates(period, user?.timezone ?? 'UTC');
 
-    const [grouped, rates] = await Promise.all([
-      this.prisma.expense.groupBy({
-        by: ['categoryId', 'currency'],
-        where: { userId, ...(categoryId ? { categoryId } : {}), date: { gte: from, lte: to } },
-        _sum: { amount: true, amountUsd: true },
-      }),
-      this.currency.getRates(),
-    ]);
+    // Grouped by date as well: the period total is the sum of rows each valued at its own date,
+    // which is what keeps a closed period's figure from moving with the exchange rate.
+    const grouped = await this.prisma.expense.groupBy({
+      by: ['categoryId', 'currency', 'date'],
+      where: { userId, ...(categoryId ? { categoryId } : {}), date: { gte: from, lte: to } },
+      _sum: { amount: true, amountUsd: true },
+    });
 
-    // categoryId -> per-currency breakdown (for converting to the base currency)
-    const groupsByCategory = new Map<
-      string,
-      { currency: string; amount: number; amountUsd: number | null }[]
-    >();
-    const allGroups: { currency: string; amount: number; amountUsd: number | null }[] = [];
+    // categoryId -> per-currency, per-date rows (for converting to the base currency)
+    const rowsByCategory = new Map<string, DatedRow[]>();
+    const allRows: DatedRow[] = [];
     for (const g of grouped) {
       const row = {
         currency: g.currency,
         amount: Number(g._sum.amount ?? 0),
         amountUsd: g._sum.amountUsd != null ? Number(g._sum.amountUsd) : null,
+        date: g.date,
       };
-      const list = groupsByCategory.get(g.categoryId) ?? [];
+      const list = rowsByCategory.get(g.categoryId) ?? [];
       list.push(row);
-      groupsByCategory.set(g.categoryId, list);
-      allGroups.push(row);
+      rowsByCategory.set(g.categoryId, list);
+      allRows.push(row);
     }
 
-    const categories = await this.prisma.expenseCategory.findMany({
-      where: { id: { in: [...groupsByCategory.keys()] } },
-      select: { id: true, name: true, emoji: true },
-    });
+    const [categories, rateAt] = await Promise.all([
+      this.prisma.expenseCategory.findMany({
+        where: { id: { in: [...rowsByCategory.keys()] } },
+        select: { id: true, name: true, emoji: true },
+      }),
+      this.fx.resolverFor([baseCurrency, ...allRows.map((r) => r.currency)], from, to),
+    ]);
     const catMap = new Map(categories.map((c) => [c.id, c]));
 
-    const items = [...groupsByCategory.entries()].map(([catId, groups]) => ({
+    const items = [...rowsByCategory.entries()].map(([catId, rows]) => ({
       category: catMap.get(catId)?.name ?? '—',
       emoji: catMap.get(catId)?.emoji ?? null,
-      // Category total in the base currency (approx. by rate). null if rates are unavailable.
-      total: this.currency.approxTotalInBase(groups, baseCurrency, rates),
+      // Category total in the base currency, each row at its own date's rate. null if unknowable.
+      total: this.currency.historicalTotalInBase(rows, baseCurrency, rateAt),
     }));
 
     return {
       baseCurrency,
-      // Overall total — a single conversion across all rows (matches the web dashboard).
-      total: this.currency.approxTotalInBase(allGroups, baseCurrency, rates),
+      // Overall total — one aggregation across all rows (matches the web dashboard).
+      total: this.currency.historicalTotalInBase(allRows, baseCurrency, rateAt),
       items,
     };
   }
@@ -194,33 +199,37 @@ export class ExpensesService {
         ? range
         : this.getPeriodDates(period, user?.timezone ?? 'UTC');
 
-    const [expenses, rates] = await Promise.all([
-      this.prisma.expense.findMany({
-        where: { userId, ...(categoryId ? { categoryId } : {}), date: { gte: from, lte: to } },
-        select: {
-          amount: true,
-          amountUsd: true,
-          currency: true,
-          description: true,
-          date: true,
-          category: { select: { name: true, emoji: true } },
-        },
-        // Within a single day (date without time) keep the insertion order by createdAt.
-        orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
-      }),
-      this.currency.getRates(),
-    ]);
+    const expenses = await this.prisma.expense.findMany({
+      where: { userId, ...(categoryId ? { categoryId } : {}), date: { gte: from, lte: to } },
+      select: {
+        amount: true,
+        amountUsd: true,
+        currency: true,
+        description: true,
+        date: true,
+        category: { select: { name: true, emoji: true } },
+      },
+      // Within a single day (date without time) keep the insertion order by createdAt.
+      orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
+    });
+
+    // An open-ended range reaches back as far as the rows do, and forward no further than today.
+    const rateAt = await this.fx.resolverFor(
+      [baseCurrency, ...expenses.map((r) => r.currency)],
+      from,
+      to ?? new Date(),
+    );
 
     // Per category keep the source rows (to recompute the total) and items (for display).
     const map = new Map<
       string,
       {
         emoji: string | null;
-        rows: { currency: string; amount: number; amountUsd: number | null }[];
+        rows: DatedRow[];
         items: { date: Date; amount: number; currency: string; description?: string }[];
       }
     >();
-    const allRows: { currency: string; amount: number; amountUsd: number | null }[] = [];
+    const allRows: DatedRow[] = [];
     for (const e of expenses) {
       const name = e.category?.name ?? '—';
       let group = map.get(name);
@@ -233,6 +242,7 @@ export class ExpensesService {
         currency: e.currency,
         amount,
         amountUsd: e.amountUsd != null ? Number(e.amountUsd) : null,
+        date: e.date,
       };
       group.rows.push(row);
       allRows.push(row);
@@ -243,14 +253,14 @@ export class ExpensesService {
     const categories = [...map.entries()].map(([category, group]) => ({
       category,
       emoji: group.emoji,
-      // Category total — converted to the base currency in a single pass (as in the web dashboard).
-      total: this.currency.approxTotalInBase(group.rows, baseCurrency, rates),
+      // Category total — each row at the rate of its own date (as in the web dashboard).
+      total: this.currency.historicalTotalInBase(group.rows, baseCurrency, rateAt),
       items: group.items,
     }));
 
     return {
       baseCurrency,
-      total: this.currency.approxTotalInBase(allRows, baseCurrency, rates),
+      total: this.currency.historicalTotalInBase(allRows, baseCurrency, rateAt),
       categories,
     };
   }

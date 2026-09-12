@@ -3,6 +3,21 @@ import { Injectable, Logger } from '@nestjs/common';
 // Rates relative to USD: rates[X] = how many units of X per 1 USD.
 export type Rates = Record<string, number>;
 
+/**
+ * How many units of `currency` one USD bought on `date`; null if that is not knowable at all.
+ * Built by FxRatesService.resolverFor over the range a report covers, so valuing a few thousand
+ * rows at their own dates still costs one query.
+ */
+export type RateAt = (currency: string, date: Date) => number | null;
+
+/** An amount that knows when it happened — the input of a period report. */
+export type DatedRow = {
+  amount: number;
+  currency: string;
+  amountUsd: number | null;
+  date: Date;
+};
+
 const BASE = 'USD';
 const TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 const ENDPOINT = `https://open.er-api.com/v6/latest/${BASE}`;
@@ -79,15 +94,11 @@ export class CurrencyService {
     return usdSum;
   }
 
-  // Convert a USD amount into the base currency at the current rate. Rounds to 2 decimals (an estimate).
-  usdToBase(usd: number, baseCurrency: string, rates: Rates | null): number | null {
-    if (!rates) return null;
-    const inBase = this.convertWithRates(rates, usd, BASE, baseCurrency);
-    if (inBase === null) return null;
-    return Math.round(inBase * 100) / 100;
-  }
-
-  // Aggregates a set of amounts into the base currency, converting EACH row individually.
+  // Aggregates a set of amounts into what they are worth in the base currency RIGHT NOW,
+  // converting each row individually. For balances, goal progress and anything else asking "how
+  // much is this today"; a report over a past period wants historicalTotalInBase instead, which
+  // does not let the answer move after the period has closed.
+  //
   // Rows already in the base currency are taken directly (no conversion): otherwise the round-trip
   // base -> USD (snapshot) -> base (current rate) at different rates diverges from the sum of the
   // items themselves. Other currencies are converted via USD (amountUsd snapshot, otherwise the
@@ -113,6 +124,41 @@ export class CurrencyService {
       const inBase = baseCurrency === BASE ? usd : this.convert_(rates, usd, BASE, baseCurrency);
       if (inBase === null) return null;
       sum += inBase;
+    }
+    return Math.round(sum * 100) / 100;
+  }
+
+  // Aggregates rows into the base currency at the rate that held on EACH ROW'S OWN DATE.
+  //
+  // This is the variant for a report over a period. approxTotalInBase answers a different
+  // question — what a pile of money is worth *right now* — which is what a balance or a goal's
+  // progress wants. Asking it about a past period makes that period drift: March's total is
+  // recomputed at today's rate every time it is opened, so it never settles, and against a
+  // high-inflation base currency it drifts one way forever, making the past look ever pricier.
+  // Valuing each row at its own date fixes the figure: fx_rates rows never change, so a closed
+  // period answers the same number a year from now.
+  //
+  // Rows already in the base currency are still taken exactly as they are, but the reason has
+  // shrunk: it is now only that amountUsd is stored rounded to cents, so the round trip
+  // base -> USD -> base would shave a fraction of a unit off every row for nothing. Before, it
+  // was papering over two mismatched rate epochs — a systematic error, not a rounding one.
+  historicalTotalInBase(rows: DatedRow[], baseCurrency: string, rateAt: RateAt): number | null {
+    let sum = 0;
+    for (const r of rows) {
+      if (r.currency === baseCurrency) {
+        sum += r.amount;
+        continue;
+      }
+      const baseRate = rateAt(baseCurrency, r.date);
+      if (baseRate === null) return null;
+      // Row value in USD: the snapshot taken at its operation date, otherwise that date's rate.
+      let usd = r.amountUsd;
+      if (usd == null) {
+        const ownRate = rateAt(r.currency, r.date);
+        if (ownRate === null) return null;
+        usd = r.amount / ownRate;
+      }
+      sum += usd * baseRate;
     }
     return Math.round(sum * 100) / 100;
   }

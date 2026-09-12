@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { BotService } from '../../bot/bot.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CurrencyService } from '../currency/currency.service';
+import { FxRatesService } from '../currency/fx-rates.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { MonthlyDigestService } from './monthly-digest.service';
 import { NotificationsService } from './notifications.service';
@@ -23,7 +24,8 @@ describe('MonthlyDigestService', () => {
     notification: { create: jest.Mock };
   };
   let notifications: { computeMonthSummary: jest.Mock; isBotPushEnabled: jest.Mock };
-  let currency: { getRates: jest.Mock; approxTotalInBase: jest.Mock; usdToBase: jest.Mock };
+  let currency: { getRates: jest.Mock; historicalTotalInBase: jest.Mock };
+  let fx: { resolverFor: jest.Mock; convertOn: jest.Mock };
   let subscriptions: { hasInvestingAccess: jest.Mock };
   let bot: { pushMessage: jest.Mock };
 
@@ -56,8 +58,11 @@ describe('MonthlyDigestService', () => {
     };
     currency = {
       getRates: jest.fn().mockResolvedValue({}),
-      approxTotalInBase: jest.fn().mockReturnValue(0),
-      usdToBase: jest.fn(),
+      historicalTotalInBase: jest.fn().mockReturnValue(0),
+    };
+    fx = {
+      resolverFor: jest.fn().mockResolvedValue(() => 1),
+      convertOn: jest.fn().mockResolvedValue(0),
     };
     subscriptions = { hasInvestingAccess: jest.fn().mockResolvedValue(false) };
     bot = { pushMessage: jest.fn() };
@@ -68,6 +73,7 @@ describe('MonthlyDigestService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: NotificationsService, useValue: notifications },
         { provide: CurrencyService, useValue: currency },
+        { provide: FxRatesService, useValue: fx },
         { provide: SubscriptionsService, useValue: subscriptions },
         { provide: BotService, useValue: bot },
       ],
